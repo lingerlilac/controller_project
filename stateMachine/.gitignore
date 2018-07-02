@@ -1,0 +1,6 @@
+.*.sw*
+*.o
+tags
+cscope.out
+doc/output
+bin
