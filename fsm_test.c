@@ -2,6 +2,8 @@
 #include <linux/types.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include "stateMachine.h"
 
 struct tcphdr {
     __be16  source;
@@ -55,6 +57,88 @@ initial cwnd is 1 based on classical protocol?
  * ?To find congestion event based on triple acks? of retransmissions?
  */
 
+enum eventType {
+  congestion,
+  over_threshold,
+  zero_window,
+};
+
+
+static struct state slow_start, congestion_process, congeston_undo, common_state, congestion_avoid;
+
+static struct state slow_start = {
+   .parentState = NULL,
+   /* The entry state is defined in order to demontrate that the 'reset'
+    * transtition, going to this group state, will be 'redirected' to the
+    * 'idle' state (the transition could of course go directly to the 'idle'
+    * state): */
+   .entryState = &congestion_avoid,
+   .transitions = (struct transition[]){
+      { syn, (void *)(intptr_t)'!', &compareKeyboardChar,
+         &printReset, &idleState, },
+      { Event_keyboard, NULL, NULL, &printUnrecognisedChar, &idleState, },
+   },
+   .numTransitions = 2,
+   .data = "group",
+   .entryAction = &printEnterMsg,
+   .exitAction = &printExitMsg,
+};
+
+static struct state congestion_avoid = {
+   .parentState = slow_start,
+   /* The entry state is defined in order to demontrate that the 'reset'
+    * transtition, going to this group state, will be 'redirected' to the
+    * 'idle' state (the transition could of course go directly to the 'idle'
+    * state): */
+   .entryState = &congestion_process,
+   .transitions = (struct transition[]){
+      { Event_keyboard, (void *)(intptr_t)'!', &compareKeyboardChar,
+         &printReset, &idleState, },
+      { Event_keyboard, NULL, NULL, &printUnrecognisedChar, &idleState, },
+   },
+   .numTransitions = 2,
+   .data = "group",
+   .entryAction = &printEnterMsg,
+   .exitAction = &printExitMsg,
+};
+
+static struct state congestion_process = {
+   .parentState = congestion_process,
+   /* The entry state is defined in order to demontrate that the 'reset'
+    * transtition, going to this group state, will be 'redirected' to the
+    * 'idle' state (the transition could of course go directly to the 'idle'
+    * state): */
+   .entryState = &congestion_undo,
+   .transitions = (struct transition[]){
+      { Event_keyboard, (void *)(intptr_t)'!', &compareKeyboardChar,
+         &printReset, &idleState, },
+      { Event_keyboard, NULL, NULL, &printUnrecognisedChar, &idleState, },
+   },
+   .numTransitions = 2,
+   .data = "group",
+   .entryAction = &printEnterMsg,
+   .exitAction = &printExitMsg,
+};
+
+static struct state congeston_undo = {
+   .parentState = congestion_process,
+   /* The entry state is defined in order to demontrate that the 'reset
+       * transtition, going to this group state, will be 'redirected' to the
+    * 'idle' state (the transition could of course go directly to the 'idle'
+    * state): */
+   .entryState = &congestion_avoid,
+   .transitions = (struct transition[]){
+      { Event_keyboard, (void *)(intptr_t)'!', &compareKeyboardChar,
+         &printReset, &idleState, },
+      { Event_keyboard, NULL, NULL, &printUnrecognisedChar, &idleState, },
+   },
+   .numTransitions = 2,
+   .data = "group",
+   .entryAction = &printEnterMsg,
+   .exitAction = &printExitMsg,
+};
+
+
 /**
  * used to specified a data flow.
  */
@@ -103,8 +187,55 @@ int get_last_congestion_time(struct flow_l *f)
     return duration;
 }
 
-int main()
+int process(skb)
 {
     struct tcphdr *tcp = tcp_hdr(skb);
     
+    int type = 0;
+    type = (int)tcp.syn;
+
+    switch(type)
+    {
+        case 2:
+            process_common_syn(tcp);
+            break;
+        case 4:
+            process_rst(tcp);
+        case 16:
+            process_common_ack(tcp);
+            break;
+
+        case 17:
+
+            break;
+
+        case 18:
+            process_ack_syn(tcp);
+            break;
+
+        default:
+
+    }
 }
+
+void process_common_ack(struct tcphdr *tcp)
+{
+
+}
+
+int process_syn(struct tcphdr *tcp)
+{
+    int cwnd = 0;
+    cwnd = get_initial_cwnd_linger(tcp);
+}
+
+void process_rst()
+{
+
+}
+
+void process_fin()
+{
+
+}
+
