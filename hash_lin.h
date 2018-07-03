@@ -19,19 +19,8 @@ struct HashNode_Struct
 {  
     char* sKey;
     __u64 time;  
-    int nValue;  
+    int cwnd;
     HashNode* pNext;  
-};  
-  
-
-struct flow_chain
-{
-  __u8 mac[6];
-  __be32 ip_src;
-  __be32 ip_dst;
-  __u16 port_src;
-  __u16 port_dst;
-  struct flow_chain *next;
 };
 
 HashNode* hashTable[HASH_TABLE_MAX_SIZE]; //hash table data strcutrue  
@@ -91,7 +80,7 @@ void hash_table_insert(const char* skey, int nvalue, __u64 time)
         {  
             // printf("%s already exists!\n", skey); 
             found_skey = 1;
-            pHead->nValue = nvalue;
+            pHead->cwnd = nvalue;
             pHead->time = time;
             break; 
             // hash_table_size --;  
@@ -105,7 +94,7 @@ void hash_table_insert(const char* skey, int nvalue, __u64 time)
         pNewNode->sKey = (char*)malloc(sizeof(char) * (strlen(skey) + 1));  
         strcpy(pNewNode->sKey, skey);
         pNewNode->time = time;  
-        pNewNode->nValue = nvalue;  
+        pNewNode->cwnd = nvalue;  
       
         pNewNode->pNext = hashTable[pos];  
         hashTable[pos] = pNewNode;  
@@ -187,7 +176,7 @@ void hash_table_print()
             while(pHead)  
             {  
                 count_count = count_count + 1;
-                printf("%s:%d  size is %d", pHead->sKey, pHead->nValue, count_count);  
+                printf("%s:%d  size is %d", pHead->sKey, pHead->cwnd, count_count);  
                 pHead = pHead->pNext;  
             }  
             printf("\n");  
@@ -199,111 +188,7 @@ void hash_table_print()
     }
 }
 
-void flows_dump(struct flow_chain *flowc)  
-{
-    count_count = 0;
-    int i;
-    char *str = NULL;
-    struct flow_chain *ptr = NULL, *last_flow = NULL;
-    int length = sizeof(char) * 6 + sizeof(__be32) * 2 + sizeof(__be16) * 2;
 
-    str = malloc(length);
-    memset(str, 0, length);
-
-    for(i = 0; i < HASH_TABLE_MAX_SIZE; ++i)  
-        if(hashTable[i])  
-        {  
-            HashNode* pHead = hashTable[i];   
-            while(pHead)  
-            {  
-                count_count = count_count + 1;
-                memcpy(str, pHead->sKey, length);
-                if(!ptr)
-                {
-                    __u8 mac[6];
-                    __be32 ip_src;
-                    __be32 ip_dst;
-                    __u16 port_src;
-                    __u16 port_dst;
-                    int length = 0;
-                    ptr = (struct flow_chain *)malloc(sizeof(struct flow_chain));
-                    memset(ptr, 0, sizeof(struct flow_chain));
-                    memcpy(&mac, str + length, 6);
-                    length += 6;
-                    memcpy(&ip_src, str + length, sizeof(__be32));
-                    length += sizeof(__be32);
-                    memcpy(&ip_dst, str + length, sizeof(__be32));
-                    length += sizeof(__be32);
-                    memcpy(&port_src, str + length, sizeof(__be16));
-                    length += sizeof(__be16);
-                    memcpy(&port_dst, str + length, sizeof(__be16));
-
-                    memcpy(ptr->mac, mac, 6);
-                    ptr->ip_src = ip_src;
-                    ptr->ip_dst = ip_dst;
-                    ptr->port_src = port_src;
-                    ptr->port_dst = port_dst;
-                    ptr->next = NULL;
-                    last_flow = ptr;
-                }
-                else
-                {
-                    struct flow_chain *new = NULL;
-                    __u8 mac[6];
-                    __be32 ip_src;
-                    __be32 ip_dst;
-                    __u16 port_src;
-                    __u16 port_dst;
-                    int length = 0;
-                    new = (struct flow_chain *)malloc(sizeof(struct flow_chain));
-                    memset(new, 0, sizeof(struct flow_chain));
-
-                    memcpy(mac, str + length , 6);
-                    length += 6;
-                    memcpy(&ip_src, str + length, sizeof(__be32));
-                    length += sizeof(__be32);
-                    memcpy(&ip_dst, str + length, sizeof(__be32));
-                    length += sizeof(__be32);
-                    memcpy(&port_src, str + length, sizeof(__be16));
-                    length += sizeof(__be16);
-                    memcpy(&port_dst, str + length, sizeof(__be16));
-
-                    memcpy(new->mac, mac, 6);
-                    new->ip_src = ip_src;
-                    new->ip_dst = ip_dst;
-                    new->port_src = port_src;
-                    new->port_dst = port_dst;
-                    new->next = NULL;
-                    last_flow->next = new;
-                    last_flow = new;                  
-                }
-                // printf("%s:%d  size is %d", pHead->sKey, pHead->nValue, count_count);  
-                pHead = pHead->pNext;  
-            }  
-            printf("\n");  
-        }  
-    if (count_count != hash_table_size)
-    {
-        printf("fuck happens\n");
-        // exit(0);
-    }
-    flowc = ptr;
-}  
-
-void delete_flow_chain(struct flow_chain *t)
-{
-    struct flow_chain *ptr = NULL;
-    ptr = t;
-    while(ptr)
-    {
-        struct flow_chain *tmp = NULL;
-        tmp = ptr;
-        ptr = ptr->next;
-        free(tmp);
-        tmp = NULL;
-    }
-}
-  
 //free the memory of the hash table  
 void hash_table_release()  
 {  
