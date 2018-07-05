@@ -45,53 +45,44 @@
 #include <net/ipv6.h>
 #include <net/mpls.h>
 #include <net/ndisc.h>
-#include <linux/if_arp.h>
-#include <linux/if_bridge.h>
-#include <linux/if_vlan.h>
-#include <linux/kernel.h>
-#include <linux/llc.h>
-#include <linux/rtnetlink.h>
-#include <linux/skbuff.h>
-#include <linux/export.h>
-
-#include <net/ip_tunnels.h>
-#include <net/rtnetlink.h>
 
 #include "datapath.h"
 #include "conntrack.h"
 #include "flow.h"
 #include "flow_netlink.h"
 #include "vport.h"
-// #include "send_utility.h"
-#include <linux/string.h>
-#include <linux/time.h>
 
-#define BUFF_SIZE 10000
-#define SEND_SIZE 1024
-struct udp_buff {
-	__be32 ip_src;
-	__be32 ip_dst;
-	__be16 sourceaddr;
-	__be16 destination;
-	__be32 sequence;
-	__be32 ack_sequence;
-	__be16 flags;
-	__be16 windowsize;
-	__be64 systime;
-	__be32 datalength;
-	char wscale[3];
-	char mac_addr[6];
-	char eth_src[6];
-	char eth_dst[6];
-	char pad[7];
+
+#define BUFF_SIZE 1000
+
+struct data_winsize {
+  __be32 ip_src;
+  __be32 ip_dst;
+  __be16 sourceaddr;
+  __be16 destination;
+  __be32 sequence;
+  __be32 ack_sequence;
+  __be16 flags;
+  __be16 windowsize;
+  __be64 systime;
+  __be32 datalength;
+  char wscale[3];
+  char eth_src[6];
+  char eth_dst[6];
+  char pad[5];
 };
 
-#define UDP_UTILITY_SIZE 64
-struct udp_buff ubuff[BUFF_SIZE];
+struct data_winsize ubuff[BUFF_SIZE];
 int uhead = 0;
 int utail = 0;
-__u32 dstip = 0xca76e470;
-__s16 dstport = 6666;
+// int *uhead_p = &uhead;
+__u64 packet_amount = 0;
+EXPORT_SYMBOL_GPL(ubuff);
+EXPORT_SYMBOL_GPL(uhead);
+EXPORT_SYMBOL_GPL(utail);
+// EXPORT_SYMBOL_GPL(uhead_p);
+EXPORT_SYMBOL_GPL(packet_amount);
+
 u64 ovs_flow_used_time(unsigned long flow_jiffies)
 {
 	struct timespec cur_ts;
@@ -563,7 +554,9 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 {
 	int error;
 	struct ethhdr *eth;
-	int loc, dlen;
+
+////////////////////
+	int loc;
 	__be32 ip_src, ip_dst;
 	__be16 tcp_flags;
 	
@@ -573,16 +566,14 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 	int tot_len;
 	int d_len;
 	unsigned char* opt_ptr;
-
-	// struct net *net;
-	struct net_device *dev;
-	char name[]="br0";
-	dev = dev_get_by_name(&init_net, name);
+///////////////////
 	/* Flags are always used as part of stats */
 	key->tp.flags = 0;
-	printk(KERN_ALERT "fuckyea");
-	skb_reset_mac_header(skb);
 
+	skb_reset_mac_header(skb);
+	eth = eth_hdr(skb);
+	ether_addr_copy(key->eth.src, eth->h_source);
+	ether_addr_copy(key->eth.dst, eth->h_dest);
 	/* Link layer. */
 	clear_vlan(key);
 	if (ovs_key_mac_proto(key) == MAC_PROTO_NONE) {
@@ -634,6 +625,10 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 		key->ipv4.addr.src = nh->saddr;
 		key->ipv4.addr.dst = nh->daddr;
 
+		ip_src = nh->saddr;
+		ip_dst = nh->daddr;
+		tot_len = nh->tot_len;
+		ihl = nh->ihl;
 		key->ip.proto = nh->protocol;
 		key->ip.tos = nh->tos;
 		key->ip.ttl = nh->ttl;
@@ -652,29 +647,27 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 		/* Transport layer. */
 		if (key->ip.proto == IPPROTO_TCP) {
 			if (tcphdr_ok(skb)) {
-				struct tcphdr *tcp = tcp_hdr(skb);
 				int condition = -10;
-
+				struct tcphdr *tcp = tcp_hdr(skb);
 				key->tp.src = tcp->source;
 				key->tp.dst = tcp->dest;
 				key->tp.flags = TCP_FLAGS_BE16(tcp);
-
 				tcp_flags = key->tp.flags;
-				condition = tcp->source == 6026 + tcp->dest == 6026 + tcp->source == 6666 + tcp->dest == 6666 + tcp->source == 6681 + tcp->dest == 6681 + tcp->source == 6682 + tcp->dest == 6682 + tcp->source == 6683 + tcp->dest == 6683;
-				printk(KERN_INFO "WOCANNIMA1\n");
+				condition = (tcp->source == 6666) + (tcp->dest == 6666);
 				if(condition == 0)
 				{
 					struct timeval tv;
 	    				__be64 systime = 0;
 	    				do_gettimeofday(&tv);
-	    				systime =  tv.tv_sec * 1000 + tv.tv_usec / 1000;				
-	 				loc = (utail + 1) % BUFF_SIZE;
-					dlen = (utail + BUFF_SIZE - uhead) % BUFF_SIZE;
-					if (dlen >= BUFF_SIZE)
-						return -1;
+	    				systime =  tv.tv_sec * 1000 + tv.tv_usec / 1000;
+	    				printk(KERN_DEBUG "flow %lld\n", systime);				
+	 				// loc = (utail + 1) % BUFF_SIZE;
+	 				loc = utail;
+					// dlen = (utail + BUFF_SIZE - uhead) % BUFF_SIZE;
+					// if (dlen >= BUFF_SIZE)
+					// 	return -1;
 					memcpy(ubuff[loc].eth_src, eth->h_source, 6);
 					memcpy(ubuff[loc].eth_dst, eth->h_dest, 6);
-					memcpy(ubuff[loc].mac_addr, dev->dev_addr, 6);
 					ubuff[loc].ip_src = ip_src;
 					ubuff[loc].ip_dst = ip_dst;
 					ubuff[loc].sourceaddr = tcp->source;
@@ -686,6 +679,9 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 					ubuff[loc].systime = systime;
 					d_len = tot_len - (tcp->doff + ihl)*4;
 					ubuff[loc].datalength = d_len;
+
+					packet_amount += 1;
+
 					if (tcp->syn == 1) {
 						opt_off = 0;
 						opt_len = tcp->doff * 4 - 20;
@@ -707,70 +703,8 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 						memset(ubuff[loc].wscale, 0, 3);
 					}
 					utail = loc;
+					utail = (utail + 1) % BUFF_SIZE;
 				}
-				printk(KERN_ALERT "outside\n");
-				while(dlen > 16)
-				{
-					int offset = 0;
-					int i = 0;
-					int err = 0;
-    				struct socket *sock;
-    				struct sockaddr_in daddr;
-    				struct kvec iov;
-    				struct msghdr msg = {.msg_flags = MSG_DONTWAIT|MSG_NOSIGNAL};
-    				int len = 0;
-    				// char buffer[] = "axxxxxxxxxxxxx";
-    				// char str[] = "abcdef";
-    				char buffer[SEND_SIZE];
-					memset(buffer, 0, SEND_SIZE);
-					// for(i=0;i<16;i++)
-					printk(KERN_ALERT "dlen > 16");
-					while(offset < (SEND_SIZE - UDP_UTILITY_SIZE))
-					{
-						memcpy(buffer + offset, ubuff + uhead, UDP_UTILITY_SIZE);
-						uhead = (uhead + 1) % BUFF_SIZE;
-						offset = offset + UDP_UTILITY_SIZE;
-						// dlen = (utail + BUFF_SIZE - uhead) % BUFF_SIZE;
-						dlen = dlen - 1;
-					}
-					// buffer[SEND_SIZE] = '\0';
-    				
-    				iov.iov_base = (void *)buffer;
-    				iov.iov_len = SEND_SIZE;
-    				err = sock_create_kern(&init_net, PF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock);
-				    if (err < 0) 
-				    {
-				        printk(KERN_ALERT "UDP create sock err, err=%d\n", err);
-				        break;
-				    }
-
-				    daddr.sin_family = AF_INET;
-				    daddr.sin_addr.s_addr = cpu_to_be32(dstip);
-				    daddr.sin_port = cpu_to_be16(dstport);
-				    err = sock->ops->connect(sock, (struct sockaddr*)&daddr,
-				            sizeof(struct sockaddr), 0);
-				    if (err < 0) 
-				    {
-				        printk(KERN_ALERT "sock connect err, err=%d\n", err);
-				        break;
-				    }
-
-			        len = kernel_sendmsg(sock, &msg, &iov, 1, SEND_SIZE);
-			        if (len != SEND_SIZE) 
-			        {
-			            printk(KERN_ALERT "kernel_sendmsg err, len=%d, buffer=%d\n",
-			                    len, strlen(buffer));
-			            if (len == -ECONNREFUSED) 
-			            {
-			                printk(KERN_ALERT "Receive Port Unreachable packet!\n");
-			            }
-			            // break;
-			        }
-			        else
-			        	printk(KERN_ALERT "send successful\n");
-			        sock_release(sock);
-			    }
-		        				
 			} else {
 				memset(&key->tp, 0, sizeof(key->tp));
 			}
