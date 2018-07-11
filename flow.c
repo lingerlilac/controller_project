@@ -54,6 +54,7 @@
 
 
 #define BUFF_SIZE 1000
+#define SEND_SIZE 1024
 
 struct data_winsize {
   __be32 ip_src;
@@ -71,17 +72,95 @@ struct data_winsize {
   char eth_dst[6];
   char pad[5];
 };
+struct winsize_t
+{
+	__u16 category;
+	char mac[6];
+	struct 	data_winsize winsize;
+};
 
-struct data_winsize ubuff[BUFF_SIZE];
-int uhead = 0;
-int utail = 0;
-// int *uhead_p = &uhead;
-__u64 packet_amount = 0;
-EXPORT_SYMBOL_GPL(ubuff);
-EXPORT_SYMBOL_GPL(uhead);
-EXPORT_SYMBOL_GPL(utail);
-// EXPORT_SYMBOL_GPL(uhead_p);
-EXPORT_SYMBOL_GPL(packet_amount);
+char 	public_buffer[SEND_SIZE];
+int 	write_begin = 0;
+struct socket *sock_global;
+
+struct socket * get_sock_linger(void)
+{
+	struct socket *sock;
+	struct sockaddr_in s_addr;
+	__s16 dstport = 6666;
+	__u32 dstip = 0xc0a80b64;
+	int ret = 0;
+
+	memset(&s_addr, 0, sizeof(s_addr));
+	s_addr.sin_family = AF_INET;
+	s_addr.sin_port = cpu_to_be16(dstport);
+
+	s_addr.sin_addr.s_addr = cpu_to_be32(dstip); /*server ip is 192.168.209.134*/
+	sock = (struct socket *)kmalloc(sizeof(struct socket), GFP_KERNEL);
+
+	/*create a socket*/
+	// ret=sock_create_kern(&init_net, AF_INET, SOCK_STREAM,0,&sock);
+	ret = sock_create_kern(&init_net, AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock);
+
+	if (ret < 0) {
+		printk("client:socket create error!\n");
+		return NULL;
+	}
+	printk("client: socket create ok!\n");
+
+	/*connect server*/
+	ret = sock->ops->connect(sock, (struct sockaddr *)&s_addr, sizeof(s_addr), 0);
+	if (ret != 0) {
+		printk("client:connect error!\n");
+		return NULL;
+	}
+	printk("client:connect ok!\n");
+	return sock;
+}
+
+ 
+void send_the_buffer(void)
+{
+	struct kvec iov;
+	struct msghdr msg = {.msg_flags = MSG_DONTWAIT | MSG_NOSIGNAL};
+	int len = 0;
+
+	char buffer[SEND_SIZE];
+
+	if(!sock_global)
+		sock_global = get_sock_linger();
+	memset(&buffer, 0, SEND_SIZE);
+	memcpy(buffer, public_buffer, write_begin);
+
+	iov.iov_base = (void *)buffer;
+	iov.iov_len = write_begin;
+	len = kernel_sendmsg(sock_global, &msg, &iov, 1, write_begin);
+	if (len != write_begin)
+	{
+		if (len == -ECONNREFUSED)
+		{
+			printk(KERN_ALERT "Receive Port Unreachable packet!\n");
+		}
+	}
+	memset(public_buffer, 0, SEND_SIZE);
+	write_begin = 0;
+
+}
+
+void write_2_public_buffer(void *data, int length)
+{
+	if ((write_begin + length) <= SEND_SIZE)
+	{
+		memcpy(public_buffer + write_begin, data, length);
+		write_begin = write_begin + length;
+	}
+	else
+	{
+		send_the_buffer();
+		memcpy(public_buffer + write_begin, data, length);
+		write_begin = write_begin + length;
+	}
+}
 
 u64 ovs_flow_used_time(unsigned long flow_jiffies)
 {
@@ -555,18 +634,17 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 	int error;
 	struct ethhdr *eth;
 
-////////////////////
-	int loc;
-	__be32 ip_src, ip_dst;
-	__be16 tcp_flags;
-	
-	int opt_len;
-	int opt_off;
-	int ihl;
-	int tot_len;
-	int d_len;
-	unsigned char* opt_ptr;
-///////////////////
+	////////////////////
+		__be32 ip_src, ip_dst;
+		__be16 tcp_flags;
+		
+		int opt_len;
+		int opt_off;
+		int ihl;
+		int tot_len;
+		int d_len;
+		unsigned char* opt_ptr;
+	///////////////////
 	/* Flags are always used as part of stats */
 	key->tp.flags = 0;
 
@@ -646,6 +724,9 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 
 		/* Transport layer. */
 		if (key->ip.proto == IPPROTO_TCP) {
+			struct data_winsize wz_linger;
+			struct winsize_t t;
+			memset(&t, 0, sizeof(struct winsize_t));
 			if (tcphdr_ok(skb)) {
 				int condition = -10;
 				struct tcphdr *tcp = tcp_hdr(skb);
@@ -657,30 +738,31 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 				if(condition == 0)
 				{
 					struct timeval tv;
-	    				__be64 systime = 0;
-	    				do_gettimeofday(&tv);
-	    				systime =  tv.tv_sec * 1000 + tv.tv_usec / 1000;
-	    				printk(KERN_DEBUG "flow %lld\n", systime);				
+					
+					__be64 systime = 0;
+					memset(&wz_linger, 0, sizeof(struct data_winsize));
+	    				
+    				do_gettimeofday(&tv);
+    				systime =  tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    				printk(KERN_DEBUG "flow %lld\n", systime);				
 	 				// loc = (utail + 1) % BUFF_SIZE;
-	 				loc = utail;
+	 				// loc = utail;
 					// dlen = (utail + BUFF_SIZE - uhead) % BUFF_SIZE;
 					// if (dlen >= BUFF_SIZE)
 					// 	return -1;
-					memcpy(ubuff[loc].eth_src, eth->h_source, 6);
-					memcpy(ubuff[loc].eth_dst, eth->h_dest, 6);
-					ubuff[loc].ip_src = ip_src;
-					ubuff[loc].ip_dst = ip_dst;
-					ubuff[loc].sourceaddr = tcp->source;
-					ubuff[loc].destination = tcp->dest;
-					ubuff[loc].sequence = tcp->seq;
-					ubuff[loc].ack_sequence = tcp->ack_seq;
-					ubuff[loc].flags = key->tp.flags;
-					ubuff[loc].windowsize = tcp->window;
-					ubuff[loc].systime = systime;
+					memcpy(wz_linger.eth_src, eth->h_source, 6);
+					memcpy(wz_linger.eth_dst, eth->h_dest, 6);
+					wz_linger.ip_src = ip_src;
+					wz_linger.ip_dst = ip_dst;
+					wz_linger.sourceaddr = tcp->source;
+					wz_linger.destination = tcp->dest;
+					wz_linger.sequence = tcp->seq;
+					wz_linger.ack_sequence = tcp->ack_seq;
+					wz_linger.flags = key->tp.flags;
+					wz_linger.windowsize = tcp->window;
+					wz_linger.systime = systime;
 					d_len = tot_len - (tcp->doff + ihl)*4;
-					ubuff[loc].datalength = d_len;
-
-					packet_amount += 1;
+					wz_linger.datalength = d_len;
 
 					if (tcp->syn == 1) {
 						opt_off = 0;
@@ -694,17 +776,18 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 							opt_off ++;
 						}
 						if (*(opt_ptr + opt_off) == 3)
-							memcpy(ubuff[loc].wscale, opt_ptr + opt_off, 3);
+							memcpy(wz_linger.wscale, opt_ptr + opt_off, 3);
 						else {
-							memset(ubuff[loc].wscale, 0, 3);
+							memset(wz_linger.wscale, 0, 3);
 						}
 					} 	
 					else {
-						memset(ubuff[loc].wscale, 0, 3);
+						memset(wz_linger.wscale, 0, 3);
 					}
-					utail = loc;
-					utail = (utail + 1) % BUFF_SIZE;
 				}
+				t.category = 1;
+				// memcpy()
+				write_2_public_buffer(&t, sizeof(struct winsize_t));
 			} else {
 				memset(&key->tp, 0, sizeof(key->tp));
 			}

@@ -171,3 +171,128 @@ int check_triple_acks(struct tcphdr *tcp)
 
     return res;
 }
+
+
+void process_packet(struct tcphdr *tcp)
+{
+    getcurrenttime();
+}
+
+static void get_systime_linger(__be32 *t, __be32 *v)
+{
+    struct timeval tv;
+    memset(&tv, 0, sizeof(struct timeval));
+    do_gettimeofday(&tv);
+    *t = tv.tv_sec;
+    *v = tv.tv_usec;
+}
+
+
+void process_linger(struct tcphdr *tcp)
+{
+    int length = 0;
+    length = get_length(tcp);
+    if(length > 0)
+    {
+        switch(length)
+        {
+            case 1:
+                process_fin(tcp);
+                break;
+            case 2:
+                process_syn(tcp);
+                break;
+            case 4:
+                process_fin(tcp);
+                break;
+            case 16:
+                process_common_ack(tcp);
+                break;
+            case 17:
+                process_fin(tcp);
+                break;
+            case 18:
+                process_syn_ack(tcp);
+                break;
+            case 20:
+                process_fin(tcp);
+                break;
+            default:
+                break; 
+        }
+    }
+}
+
+void process_fin(struct tcphdr *tcp)
+{
+    del_sequence_from_queue(tcp);
+    update(cwnd, tcp, 0);
+}
+
+void process_syn(struct tcphdr *tcp)
+{
+    int cwnd = 0;
+    put_sequence_into_queue(tcp->seq);
+    cwnd = get_initial_cwnd_linger(tcp);
+    update(cwnd, tcp, 1);
+}
+
+void process_common_ack(struct tcphdr *tcp)
+{
+    int sequence = tcp->seq;
+    int congestion = 0;
+    int cwnd = 0;
+    congestion = get_congestion(tcp);
+    if(condition)
+    {
+        cwnd = congestion_new_cwnd(tcp);
+    }
+    else
+    {
+        cwnd = common_new_cwnd(tcp);
+    }
+    update(cwnd, tcp, 1);
+}
+
+void process_syn_ack(struct tcphdr *tcp)
+{
+    int cwnd = 0;
+    put_sequence_into_queue(tcp->seq);
+    cwnd = get_initial_cwnd_linger(tcp);
+    update(cwnd, tcp, 1);
+}
+
+int congestion_new_cwnd(struct tcphdr *tcp)
+{
+    int cwnd = 0;
+
+    return cwnd;
+}
+
+int common_new_cwnd(struct tcphdr *tcp)
+{
+    int cwnd = 0;
+
+    return cwnd;
+}
+
+void del_sequence_from_queue(struct tcphdr *tcp)
+{
+
+}
+
+void update(int cwnd, struct tcphdr *tcp, int condition)
+{
+
+}
+
+int get_initial_cwnd_linger(struct tcphdr *tcp)
+{
+
+}
+
+void put_sequence_into_queue(struct tcphdr *tcp)
+{
+
+}
+
