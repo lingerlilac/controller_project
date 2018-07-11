@@ -192,6 +192,7 @@ for item in survey:
 del drop, queue, survey, iw, wait_to_del, lines, times
 
 length = len(data_list)
+processed_data = []
 
 for i in range(0, length):
     found = False
@@ -202,8 +203,51 @@ for i in range(0, length):
     if found is True:
         previous = data_list[i]
         currentd = data_list[j]
-        
+        tmp1 = float(currentd.drop_count - previous.drop_count)
+        tmp2 = float(currentd.timex_drop - previous.timex_drop)
+        currentd.drop_count = round(tmp1 / tmp2, 4)
+        tmp1 = float(currentd.survey_time - previous.survey_time)
+        tmp2 = float(currentd.timex_survery - previous.timex_survery)
+        currentd.timex_survery = round(tmp1 / tmp2, 4)
 
+        tmp1 = float(currentd.time_busy - previous.time_busy)
+        currentd.time_busy = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.time_ext_busy - previous.time_ext_busy)
+        currentd.time_ext_busy = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.time_rx - previous.time_rx)
+        currentd.time_rx = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.time_tx - previous.time_tx)
+        currentd.time_tx = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.time_scan - previous.time_scan)
+        currentd.time_scan = round(tmp1 / tmp2, 4)
+
+        tmp2 = float(currentd.timex_queue - previous.timex_queue)
+
+        tmp1 = float(currentd.bytes1 - previous.bytes1)
+        currentd.bytes1 = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.packets - previous.packets)
+        currentd.packets = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.drops - previous.drops)
+        currentd.drops = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.requeues - previous.requeues)
+        currentd.requeues = round(tmp1 / tmp2, 4)
+
+        tmp1 = float(currentd.overlimits - previous.overlimits)
+        currentd.overlimits = round(tmp1 / tmp2, 4)
+
+        processed_data.append(currentd)
+
+del data_list
+
+for i in processed_data:
+    print i.time_busy
 gc.collect()
 if fil1:
     fil1.close()
