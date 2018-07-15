@@ -1,0 +1,8 @@
+objects =  6667.o
+
+helloworld: $(objects)
+	gcc -o 6667 $(objects)  -lpthread -L/usr/lib/mysql -lmysqlclient
+6667.o: 6667.c hash_lin.h
+	gcc -c 6667.c  -lpthread 
+clean:
+	rm -f *.o 6667
