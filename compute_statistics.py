@@ -23,7 +23,7 @@ from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support as score
 import re
-
+import sys
 # maclist = ("04:a1:51:96:ca:83",
 #            "04:a1:51:a3:57:1a",
 #            "44:94:fc:82:d9:8e",
@@ -33,8 +33,12 @@ import re
 #            "04:a1:51:a7:54:f9",
 #            "04:a1:51:8e:f1:cb")
 
+file_write = sys.argv[3]
+file_read_time = sys.argv[2]
+file_read_information = sys.argv[1]
+
 try:
-    fil2 = codecs.open("statistics.txt", "w", 'utf_8_sig')
+    fil2 = codecs.open(file_write, "w", 'utf_8_sig')
     # fil6 = codecs.open("channel_ssid_time.csv", "w", 'utf_8_sig')
     write_record = csv.writer(fil2)
     # write_ssid = csv.writer(fil6)
@@ -43,8 +47,8 @@ except Exception:
     exit()
 
 try:
-    fil1 = open("6667.txt", "r")
-    fil3 = open("retranstime.txt", "r")
+    fil1 = open(file_read_information, "r")
+    fil3 = open(file_read_time, "r")
 except Exception:
     print "6666 or retranstime open failed."
 
@@ -123,8 +127,8 @@ queue = sorted(queue)
 iw = sorted(iw)
 survey = sorted(survey)
 beacon = sorted(beacon)
-last_low_index = -1
-last_low_index1 = -1
+last_low_index = 0.2
+last_low_index1 = 0.2
 
 
 def BinSearch(array, key, low, high):
@@ -134,6 +138,8 @@ def BinSearch(array, key, low, high):
         return array[mid]
     if low > high:
         # return False
+        if last_low_index == 0.2:
+            return 'error'
         return array[last_low_index]
     if key < array[mid][0]:
         return BinSearch(array, key, low, mid - 1)  # 递归
@@ -149,6 +155,8 @@ def BinSearch_ind(array, key, low, high):
         return mid
     if low > high:
         # return False
+        if last_low_index1 == 0.2:
+            return 'error'
         return last_low_index1
     if key < array[mid][0]:
         return BinSearch_ind(array, key, low, mid - 1)  # 递归
@@ -168,13 +176,19 @@ for item in times:
     if tm < int(survey[0][0]):
         continue
     ind = BinSearch_ind(survey, tm, 0, len(survey) - 1)
+    if ind == 'error':
+        continue
     (timex_survey, mac_addr, survey_time, time_busy, time_ext_busy,
      time_rx, time_tx, time_scan, center_freq, noise) = survey[ind]
     wait_to_del.add(ind)
     dp = BinSearch(drop, tm, 0, len(drop) - 1)
+    if dp == 'error':
+        continue
     drop_count = dp[len(dp) - 1]
     timex_drop = dp[0]
     qu = BinSearch(queue, tm, 0, len(queue) - 1)
+    if qu == 'error':
+        continue
     (timex_queue, mac_addr, queue_id, bytes1, packets,
      qlen, backlog, drops, requeues, overlimits) = qu
     # iw1 = BinSearch(iw, tm, 0, len(iw) - 1)
@@ -197,9 +211,13 @@ for item in survey:
     (timex_survey, mac_addr, survey_time, time_busy, time_ext_busy,
      time_rx, time_tx, time_scan, center_freq, noise) = item
     dp = BinSearch(drop, tm, 0, len(drop) - 1)
+    if dp == 'error':
+        continue
     drop_count = dp[len(dp) - 1]
     timex_drop = dp[0]
     qu = BinSearch(queue, tm, 0, len(queue) - 1)
+    if qu == 'error':
+        continue
     (timex_queue, mac_addr, queue_id, bytes1, packets,
      qlen, backlog, drops, requeues, overlimits) = qu
     # iw1 = BinSearch(iw, tm, 0, len(iw) - 1)

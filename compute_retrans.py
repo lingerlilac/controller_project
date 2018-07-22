@@ -7,6 +7,7 @@ import codecs
 import matplotlib
 import matplotlib.pyplot as plt
 from decimal import *
+import sys
 
 # maclist = ("04:a1:51:96:ca:83",
 #            "04:a1:51:a3:57:1a",
@@ -17,8 +18,12 @@ from decimal import *
 #            "04:a1:51:a7:54:f9",
 #            "04:a1:51:8e:f1:cb")
 
+file_write = sys.argv[2]
+file_read = sys.argv[1]
+# print sys.argv[1], sys.argv[2]
+# exit()
 try:
-    fil2 = codecs.open("retranstime.txt", "w", 'utf_8_sig')
+    fil2 = codecs.open(file_write, "w", 'utf_8_sig')
     # fil6 = codecs.open("channel_ssid_time.csv", "w", 'utf_8_sig')
     write_record = csv.writer(fil2)
     # write_ssid = csv.writer(fil6)
@@ -27,9 +32,10 @@ except Exception:
     exit()
 
 try:
-    fil1 = open("6666.txt", "r")
+    fil1 = open(file_read, "r")
 except Exception:
     print "6666 open failed."
+    exit()
 
 # try:
 #     fil2 = open("6667.txt", "r")
@@ -42,11 +48,15 @@ retrans_dic = {}
 retrans_pkt = []
 
 for item in lines:
-    (WINSIZE, timex, mac_addr, eth_src, eth_dst,
-     ip_src, ip_dst, sourceaddr, destination,
-     sequence, ack_sequence, windowsize,
-     cal_windowsize, datalength, flags, kind,
-     length, wscale, x) = re.split(",", item)
+    try:
+        (WINSIZE, timex, mac_addr, eth_src, eth_dst,
+         ip_src, ip_dst, sourceaddr, destination,
+         sequence, ack_sequence, windowsize,
+         cal_windowsize, datalength, flags, kind,
+         length, wscale, x) = re.split(",", item)
+    except Exception:
+        print item
+        break
     key = str(int(sequence)) + "." + str(int(ack_sequence))
     # key = float(key)
     timex = int(timex)
