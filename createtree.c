@@ -3,6 +3,24 @@
 #include <string.h>
 #define ITEM_AMOUNT 100
 
+struct flow_linger
+{
+    char ip_src[20];
+    char ip_dst[20];
+    int  port_src;
+    int  port_dst;
+    int winsize;
+};
+void generate_command(struct flow_linger *ptr, char *ret, int size)
+{
+    char buff[200];
+
+    memset(buff, 0, 200);
+    sprintf(buff, "ovs-ofctl add-flow br0 -O openflow13 tcp,nw_dst=%s,nw_dst=%s,tcp_src=%d,tcp_dst=%d,actions=set_rwnd:%d", 
+        ptr->ip_src, ptr->ip_dst, ptr->port_src, ptr->port_dst, ptr->winsize);
+    // printf("%s\n", buff);
+    strncpy(ret, buff, size);
+}
 
 struct rawdata
 {
@@ -40,10 +58,10 @@ struct tcp_flow
 };
 typedef enum windowsize
 {
-	t_quater;
-	half;
-	quater;
-	zero;
+	keep,
+	half,
+	quater,
+	zero
 } windsz;
 void free_rawdata(struct rawdata *);
 void print_rawdata(struct rawdata*);
@@ -71,12 +89,32 @@ int main()
 	char inputtxt[] = "0,0,requeues_3,5158.975,0|0,1,busy_time_1,808.831,2|1,2,leaf,0,2|1,3,allpackets_1,150.5,2|3,4,leaf,0,2|3,5,requeues_1,678.932,2|5,6,drops_1,3211.45,2|6,7,leaf,0,2|6,8,leaf,0,2|5,9,leaf,0,2|0,10,busy_time_1,808.542,0|10,11,retrans_4,14.5,0|11,12,allpackets_3,182.5,0|12,13,retrans_5,14.5,0|13,14,retrans_3,0.5,0|14,15,receive_time_1,122.551,0|15,16,leaf,0,0|15,17,leaf,0,1|14,18,transmit_time_4,32.177,0|18,19,leaf,0,0|18,20,leaf,0,0|13,21,leaf,0,0|12,22,allpackets_1,202.5,0|22,23,rbytes_3,257018.672,0|23,24,leaf,0,0|23,25,allpackets_1,170.5,0|25,26,leaf,0,0|25,27,leaf,0,0|22,28,leaf,0,0|11,29,leaf,0,0|10,30,leaf,0,2";
  	char item[] = "requeues_3,5000;busy_time_1,809;allpackets_1,160;requeues_1,670;drops_1,3220;retrans_4,0;allpackets_3,0;retrans_5,0;retrans_3,0;receive_time_1,0;transmit_time_4,0;rbytes_3,0";
  	struct treenode* search_results = NULL;
+ 	windsz wsize;
+ 	char *ret = NULL;
+ 	char ipsrc[] = "192.168.1.120";
+ 	char ipdst[] = "202.118.228.111";
+ 	int port_src = 80;
+ 	int port_dst = 210;
 
  	init(inputtxt, item);
 
  	search_results = bst_search(tnode, items_list);
 	if(search_results)
+	{
+	    struct flow_linger flow1;
+	    strcpy(flow1.ip_src, ipsrc);
+	    strcpy(flow1.ip_dst, ipdst);
+	    flow1.port_src = port_src;
+	    flow1.port_dst = port_dst;
+	    flow1.winsize = 100;
 		printf("%d class\n", search_results->class);
+		wsize= (windsz)search_results->class;
+	    ret = malloc(sizeof(char) * 200);
+	    generate_command(&flow1, ret, 200);
+	    printf("ret is %s\n", ret);
+	    free(ret);
+	    ret = NULL; 
+	}
 		// printf("ad\n");
 	else
 		printf("not found\n");
