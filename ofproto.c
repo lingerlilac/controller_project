@@ -3550,13 +3550,14 @@ void handle_msg(struct ofpbuf *msg)
 {
   struct iw * iwlist = NULL;
   char * msg_rec = NULL;
-  VLOG_INFO("msg data is %s", msg->data + 16);
-  iwlist = process(msg->data + 16);
-  print_iwlist(iwlist);
-  free_iwlist(iwlist);
+  int length = 0;
+  // VLOG_INFO("msg data is %s", msg->data + 16);
+
+  length = msg->size - 15;
+  // length = 104;
     // VLOG_INFO("msg header is %s\n", msg->header);
     // VLOG_INFO("msg size is %d msg allocated is %d\n", msg->size, msg->allocated);
-  VLOG_INFO("msg_before is %s", ofpbuf_to_string(msg, msg->size));
+  VLOG_INFO("msg_before is %s %d", ofpbuf_to_string(msg, msg->size), length);
     // VLOG_INFO("msg_after is %s", ofpbuf_onlydata_to_string(msg, msg->size));
     // char *stringtmp = *(ofpbuf_onlydata_to_string(msg, msg->size) + 47);
     // char * stringtmp;
@@ -3569,10 +3570,16 @@ void handle_msg(struct ofpbuf *msg)
     //     VLOG_INFO("%c", stringtmp[i]);
     // }
     // handle_tree(ofpbuf_to_string(msg, msg->size));
-  msg_rec = (char *)malloc(sizeof(char) * strlen(msg->data + 16));
-  memset(msg_rec, 0, sizeof(char) * strlen(msg->data + 16));
-  strcpy(msg_rec, msg->data + 16);
+  msg_rec = (char *)malloc(sizeof(char) * length);
+  memset(msg_rec, 0, sizeof(char) * length);
+  // strcpy(msg_rec, length - 1);
+  memcpy(msg_rec, msg->data + 16, length - 1);
+  // msg_rec[length - 1] = '\0';
   VLOG_INFO("msg_rec is %s\n", msg_rec);
+  // handle_tree(msg_rec);
+  iwlist = process(msg_rec);
+  print_iwlist(iwlist);
+  free_iwlist(iwlist);
   handle_tree(msg_rec);
   free(msg_rec);
   msg_rec = NULL;
