@@ -1,0 +1,31 @@
+State      Recv-Q Send-Q      Local Address:Port          Peer Address:Port   
+LAST-ACK   1      1          192.168.11.103:47796         106.11.62.72:http    
+	 cubic rto:64512 rtt:48.136/18.529 ato:40 mss:1340 cwnd:1 ssthresh:7 send 222.7Kbps pacing_rate 4.5Mbps unacked:1 retrans:1/9 lost:1 rcv_space:29200
+LAST-ACK   1      1          192.168.11.103:55120         106.11.186.1:http    
+	 cubic wscale:9,7 rto:65536 rtt:54.497/15.526 ato:40 mss:1452 cwnd:1 ssthresh:7 send 213.1Kbps pacing_rate 4.3Mbps unacked:1 retrans:1/9 lost:1 rcv_space:29200
+CLOSE-WAIT 1      0          192.168.11.103:60858         106.11.92.29:http    
+	 cubic rto:252 rtt:51.82/19.923 ato:40 mss:1452 cwnd:10 send 2.2Mbps pacing_rate 4.5Mbps rcv_space:29200
+LAST-ACK   1      1          192.168.11.103:47808         106.11.62.72:http    
+	 cubic rto:63488 rtt:46.553/17.534 ato:40 mss:1340 cwnd:1 ssthresh:7 send 230.3Kbps pacing_rate 4.6Mbps unacked:1 retrans:1/9 lost:1 rcv_space:29200
+LAST-ACK   1      1          192.168.11.103:47822         106.11.62.72:http    
+	 cubic rto:8192 rtt:52.035/19.736 ato:40 mss:1340 cwnd:1 ssthresh:7 send 206.0Kbps pacing_rate 4.1Mbps unacked:1 retrans:1/6 lost:1 rcv_space:29200
+ESTAB      0      0          192.168.11.103:57416          106.11.45.4:http    
+	 cubic rto:252 rtt:49.906/18.73 ato:40 mss:1452 cwnd:10 send 2.3Mbps pacing_rate 4.7Mbps rcv_space:29200
+LAST-ACK   1      1          192.168.11.103:47812         106.11.62.72:http    
+	 cubic rto:32768 rtt:53.589/20.261 ato:40 mss:1340 cwnd:1 ssthresh:7 send 200.0Kbps pacing_rate 4.0Mbps unacked:1 retrans:1/8 lost:1 rcv_space:29200
+LAST-ACK   1      1          192.168.11.103:47810         106.11.62.72:http    
+	 cubic rto:33280 rtt:56.139/21.14 ato:40 mss:1340 cwnd:1 ssthresh:7 send 191.0Kbps pacing_rate 3.8Mbps unacked:1 retrans:1/8 lost:1 rcv_space:29200
+SYN-SENT   0      1          192.168.11.103:40968              6.6.6.6:https   
+	 cubic rto:32000 mss:524 cwnd:1 ssthresh:7 unacked:1 retrans:1/5 lost:1
+CLOSE-WAIT 1      0          192.168.11.103:36794         45.55.41.223:http    
+	 cubic wscale:7,7 rto:784 rtt:261.076/98.013 ato:40 mss:1448 cwnd:10 send 443.7Kbps pacing_rate 887.4Kbps rcv_rtt:260 rcv_space:29200
+SYN-SENT   0      1          192.168.11.103:40956              6.6.6.6:https   
+	 cubic rto:64000 mss:524 cwnd:1 ssthresh:7 unacked:1 retrans:1/6 lost:1
+SYN-SENT   0      1          192.168.11.103:40970              6.6.6.6:https   
+	 cubic rto:32000 mss:524 cwnd:1 ssthresh:7 unacked:1 retrans:1/5 lost:1
+SYN-SENT   0      1          192.168.11.103:40954              6.6.6.6:https   
+	 cubic rto:64000 mss:524 cwnd:1 ssthresh:7 unacked:1 retrans:1/6 lost:1
+LAST-ACK   1      1          192.168.11.103:47798         106.11.62.72:http    
+	 cubic rto:63488 rtt:47.533/17.843 ato:40 mss:1340 cwnd:1 ssthresh:7 send 225.5Kbps pacing_rate 4.5Mbps unacked:1 retrans:1/9 lost:1 rcv_space:29200
+ESTAB      0      0          192.168.11.103:36366        121.194.7.222:http    
+	 cubic wscale:9,7 rto:224 rtt:21.177/0.579 ato:40 mss:1460 cwnd:10 send 5.5Mbps pacing_rate 11.0Mbps rcv_space:29200
