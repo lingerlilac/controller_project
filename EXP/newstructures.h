@@ -392,7 +392,7 @@ __u64 getcurrenttime(void)
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+  return (__u64)tv.tv_sec * 1000000 + (__u64)tv.tv_usec;
 }
 
 //big endian to small endian

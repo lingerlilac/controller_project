@@ -21,8 +21,8 @@ typedef _Bool bool;
 #define SEND_SIZE 1024
 #define POOL_SIZE 10240000
 // #define BUFFER_STORE 10000
-#define SEQLIST 100
-#define THUNDRED 10000
+#define SEQLIST 10000
+#define THUNDRED 100000
 /**
  * fp is the file pointer to write information in.
  */
@@ -638,7 +638,7 @@ void ack_flow_info(struct data_winsize *ptr)
 				int j = 0;
 				struct seq_info *insert_place = NULL;
 				struct seq_info *tmps = NULL;
-				for (j = 0; j < 100; j++) //found, insert, find retrans.
+				for (j = 0; j < SEQLIST; j++) //found, insert, find retrans.
 				{
 					tmps = tmp->seq_list + j;
 					// printf("%d %d\n", j, tmps->seq);
@@ -699,7 +699,7 @@ void ack_flow_info(struct data_winsize *ptr)
 			int seq = ptr->ack_sequence;
 			struct seq_info *tmps = NULL;
 			tmp->ack_seq = seq;
-			for (j = 0; j < 100; j++)
+			for (j = 0; j < SEQLIST; j++)
 			{
 				tmps = tmp->seq_list + j;
 				if (tmps->seq <= seq)
@@ -1412,7 +1412,10 @@ void *format_data(void *arg)
 		struct data_queue_computed *newitem_queue_3 = NULL;
 		struct data_queue_computed*newitem_queue_f = NULL;
 		struct data_survey_computed *newitem_survey = NULL;
+		// __u64 time_last = 0, time_current = 0;
+		int amount = 0;
 
+		// time_last = getcurrenttime();
 		memset(&time_tp, 0, sizeof(struct time_structure));
 		pthread_mutex_lock(&mutex_rdata);
 		new = &(queue_list_3->queue);
@@ -1633,6 +1636,9 @@ void *format_data(void *arg)
 		}
 		if((survey_p_last == NULL) || (queue_p_last_3 == NULL))
 			continue;
+		// time_current = getcurrenttime();
+		// printf("duration is %llu %u %u\n", time_current - time_last, retrans_head, retrans_tail);
+		// time_last = time_current;
 		pthread_mutex_lock(&mutex_rdata);
 		if (retrans_head > retrans_tail) // read and update tail.
 		{
@@ -1658,27 +1664,198 @@ void *format_data(void *arg)
 
 		if (time_tp.sec == 0)
 		{
+			
 			pthread_mutex_lock(&mutex_rdata);
 			if(winsize_head > winsize_tail)
+				amount = winsize_head - winsize_tail;
+			else
+				amount = winsize_head > winsize_tail + THUNDRED;
+			pthread_mutex_unlock(&mutex_rdata);
+			while(amount > 0)
 			{
+				pthread_mutex_lock(&mutex_rdata);
 				time_tp = winsize_times[winsize_tail];
 				if((time_tp.sec < queue_p_last_3->sec) && (time_tp.sec < survey_p_last->sec))
 				{
 					winsize_tail += 1;
 					winsize_tail = winsize_tail % THUNDRED;
+					amount -= 1;
 				}
 				else
 				{	
 					pthread_mutex_unlock(&mutex_rdata);
-					continue;				
+					break;				
+				}			
+				pthread_mutex_unlock(&mutex_rdata);
+				if (time_tp.sec) //compute statistic when time_tp
+				{
+					struct data_queue_computed *q_tmp_3 = NULL,  *q_wait_to_del = NULL;
+					struct data_queue_computed *q_tmp_f = NULL;
+					struct data_survey_computed *s_tmp = NULL, *s_wait_to_del = NULL;
+					struct data_queue_computed q_keep_3;
+					struct data_queue_computed q_keep_f;
+					struct data_survey_computed s_keep;
+
+					// memset(&q_keep_3, 0, sizeof(struct data_queue_computed));
+					// memset(&q_keep_f, 0, sizeof(struct data_queue_computed));
+					if (queue_p_buffer_3 == NULL)
+						continue;
+					if (survey_p_buffer == NULL)
+						continue;
+					if (queue_p_buffer_f == NULL)
+						continue;
+					q_tmp_3 = queue_p_buffer_3;
+					q_tmp_f = queue_p_buffer_f;
+					s_tmp = survey_p_buffer;
+
+					while (q_tmp_3) // search time, above,
+					{
+						if ((time_tp.sec < q_tmp_3->sec) || ((time_tp.sec == q_tmp_3->sec) && (time_tp.usec <= q_tmp_3->usec))) // find state after it.
+						{
+							q_keep_3 = *q_tmp_3;
+							break;
+						}
+						else if ((time_tp.sec - q_tmp_3->sec) > 10) // delte old data.
+						{
+							q_wait_to_del = q_tmp_3;
+						}
+						q_tmp_3 = q_tmp_3->next;
+					}
+					q_tmp_3 = queue_p_buffer_3;
+					if (q_wait_to_del != NULL) // del the old items.
+					{
+						struct data_queue_computed *tmp = NULL;
+						while (q_tmp_3 != q_wait_to_del)
+						{
+							tmp = q_tmp_3;
+							q_tmp_3 = q_tmp_3->next;
+							free(tmp);
+							tmp = NULL;
+						}
+						queue_p_buffer_3 = q_wait_to_del;
+					}
+					q_wait_to_del = NULL;
+					while (q_tmp_f) // search time, above,
+					{
+						if ((time_tp.sec < q_tmp_f->sec) || ((time_tp.sec == q_tmp_f->sec) && (time_tp.usec <= q_tmp_f->usec)))
+						{
+							q_keep_f = *q_tmp_f;
+							break;
+						}
+						else if ((time_tp.sec - q_tmp_f->sec) > 10) // delte old data.
+						{
+							q_wait_to_del = q_tmp_f;
+						}
+						q_tmp_f = q_tmp_f->next;
+					}
+					q_tmp_f = queue_p_buffer_f;
+					if (q_wait_to_del != NULL) // delete the old items.
+					{
+						struct data_queue_computed *tmp = NULL;
+						while (q_tmp_f != q_wait_to_del)
+						{
+							tmp = q_tmp_f;
+							q_tmp_f = q_tmp_f->next;
+							free(tmp);
+							tmp = NULL;
+						}
+						queue_p_buffer_f = q_wait_to_del;
+					}
+					while (s_tmp)
+					{
+						if ((time_tp.sec < s_tmp->sec) || ((time_tp.sec == s_tmp->sec) && (time_tp.usec <= s_tmp->usec)))
+						{
+							s_keep = *s_tmp;
+							break;
+						}
+						else if ((time_tp.sec - s_tmp->sec) > 10)
+						{
+							s_wait_to_del = s_tmp;
+						}
+						s_tmp = s_tmp->next;
+					}
+					if (s_wait_to_del != NULL)
+					{
+						struct data_survey_computed *tmp = NULL;
+						s_tmp = survey_p_buffer;
+						while (s_tmp != s_wait_to_del)
+						{
+							tmp = s_tmp;
+							s_tmp = s_tmp->next;
+							// printf("1 %02x\n", tmp);
+							free(tmp);
+							// printf("2\n");
+							tmp = NULL;
+						}
+						survey_p_buffer = s_wait_to_del;
+					}
+					// printf("abc %u %u\n", s_keep.sec, q_keep_3.sec);
+					if ((s_keep.sec != 0) && (q_keep_3.sec != 0))
+					{
+						// fprintf(fretrans, "%d %u, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %f, %.4f, %.4f, %f, %f, %.4f, %.4f, %.4f\n",
+						//         1, drop_count, survey_global.time_busy, survey_global.time_ext_busy,
+						//         survey_global.time_rx, survey_global.time_tx, survey_global.time_scan,
+						//         2412, (float)survey_global.noise, queue_global_3.bytes,
+						//         queue_global_3.packets, queue_global_3.qlen, queue_global_3.backlog,
+						//         queue_global_3.drops, queue_global_3.requeues, queue_global_3.overlimits);
+						int neibours = 0;
+						int stations = 0;
+						int duration = 0;
+						struct time_structure tmp, tmp1;
+						if(s_keep.sec > q_keep_3.sec)
+						{
+							tmp.sec = q_keep_3.sec;
+							tmp.usec = q_keep_3.usec;
+						}
+						else if (s_keep.sec == q_keep_3.sec)
+						{
+							if(s_keep.usec > q_keep_3.usec)
+							{
+								tmp.sec = q_keep_3.sec;
+								tmp.usec = q_keep_3.usec;
+							}
+							else
+							{
+								tmp.sec = s_keep.sec;
+								tmp.usec = s_keep.usec;
+							}
+						}
+						else
+						{
+							tmp.sec = s_keep.sec;
+							tmp.usec = s_keep.usec;
+						}
+						pthread_mutex_lock(&mutex_rdata);
+						tmp1 = winsize_times[winsize_tail];
+						duration = ((int)tmp1.sec - (int)tmp.sec) + ((int)tmp1.usec - (int)tmp.usec) * 1000000;
+						while((duration < 0) && amount > 0)
+						{
+							winsize_tail += 1;
+							winsize_tail = winsize_tail % THUNDRED;
+							if(winsize_head > winsize_tail)
+								amount = winsize_head - winsize_tail;
+							else
+								amount = winsize_head > winsize_tail + THUNDRED;
+							tmp1 = winsize_times[winsize_tail];
+							duration = ((int)tmp1.sec - (int)tmp.sec) + ((int)tmp1.usec - (int)tmp.usec) * 1000000;
+						}
+						pthread_mutex_unlock(&mutex_rdata);
+						if(neibour_lists)
+							neibours = neibour_lists->count;
+						if(station_lists)
+							stations = station_lists->count;
+						fprintf(fretrans, "%d, %u, %u, %u, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f\n",
+						        drop, drop_count, neibours, stations, s_keep.time_busy, s_keep.time_ext_busy,
+						        s_keep.time_rx, s_keep.time_tx, s_keep.time_scan,
+						        2412, (float)s_keep.noise, q_keep_3.bytes,
+						        q_keep_3.packets, q_keep_3.qlen, q_keep_3.backlog,
+						        q_keep_3.drops, q_keep_3.requeues, q_keep_3.overlimits,
+						        q_keep_f.bytes, q_keep_f.packets, q_keep_f.qlen, q_keep_f.backlog,
+						        q_keep_f.drops, q_keep_f.requeues, q_keep_f.overlimits);
+					}
 				}
 			}
-			else
-			{	
-				pthread_mutex_unlock(&mutex_rdata);
-				continue;
-			}
-			pthread_mutex_unlock(&mutex_rdata);
+			
 		}
 		if (time_tp.sec) //compute statistic when time_tp
 		{
@@ -1807,7 +1984,11 @@ void *format_data(void *arg)
 				        q_keep_f.drops, q_keep_f.requeues, q_keep_f.overlimits);
 			}
 		}
+		// time_current = getcurrenttime();
+		// printf("duration1 is %llu %u\n", time_current - time_last, amount);
+		// time_last = time_current;
 		usleep(10000);
+		// sleep(1);
 	}
 }
 void
