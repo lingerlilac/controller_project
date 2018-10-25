@@ -21,7 +21,7 @@ typedef _Bool bool;
 #define SEND_SIZE 1024
 #define POOL_SIZE 10240000
 // #define BUFFER_STORE 10000
-#define SEQLIST 10000
+
 #define THUNDRED 100000
 /**
  * fp is the file pointer to write information in.
@@ -74,6 +74,12 @@ int retrans_tail = 0;
 struct time_structure winsize_times[THUNDRED];
 int winsize_head = 0;
 int winsize_tail = 0;
+
+int count_winsize = 1;
+int count_iw = 0;
+int count_survey = 0;
+int count_queue = 0;
+int count_retrans = 0;
 // struct data_beacon_processed *beacon_buffer[BUFFER_STORE];
 // struct data_iw_processed *iw_buffer[BUFFER_STORE];
 // // struct data_queue_processed     *queue_buffer[BUFFER_STORE];
@@ -94,6 +100,7 @@ int winsize_tail = 0;
 // time_t sec1 = 0, sec2 = 0;
 
 void *receive (void *arg);
+void *receive1 (void *arg);
 void process (char *str, int length);
 void decode_winsize (char *buf);
 void decode_drops (char *buf);
@@ -139,72 +146,178 @@ pthread_mutex_t mutex_rdata;
  * @param  arg [*arg is used for pthread create, there is no meaning for it.]
  * @return     [void]
  */
+// void *
+// receive (void *arg)
+// {
+// 	int sin_len, sin_len_other;
+// 	int port_winsize = 6666;
+// 	int port_other = 6667;
+// 	int sock, sock_other;
+// 	struct sockaddr_in sin_winsize, sin_other;
+
+
+// 	bzero (&sin_winsize, sizeof (sin_winsize));
+// 	sin_winsize.sin_family = AF_INET;
+// 	sin_winsize.sin_addr.s_addr = htonl (INADDR_ANY);
+// 	sin_winsize.sin_port = htons (port_winsize);
+// 	sin_len = sizeof (sin_winsize);
+
+// 	bzero (&sin_other, sizeof (sin_other));
+// 	sin_other.sin_family = AF_INET;
+// 	sin_other.sin_addr.s_addr = htonl (INADDR_ANY);
+// 	sin_other.sin_port = htons (port_other);
+// 	sin_len_other = sizeof (sin_other);
+
+// 	sock_other = socket (AF_INET, SOCK_DGRAM, 0);
+// 	bind (sock_other, (struct sockaddr *) &sin_other, sizeof (sin_other));
+
+// 	sock = socket (AF_INET, SOCK_DGRAM, 0);
+// 	bind (sock, (struct sockaddr *) &sin_winsize, sizeof (sin_winsize));
+
+// 	while (1)
+// 	{
+// 		int len = 0, len1 = 0;
+// 		char message[SEND_SIZE];
+// 		char message_other[SEND_SIZE];
+// 		memset (message, 0, SEND_SIZE);
+// 		memset (message_other, 0, SEND_SIZE);
+// 		len =
+// 		    recvfrom (sock, message, SEND_SIZE, 0, (struct sockaddr *) &sin_winsize,
+// 		              (socklen_t*)&sin_len);
+// 		// if (len <= 0)
+// 		// {
+// 		// 	printf ("receive error\n");
+// 		// 	continue;
+// 		// }
+// 		len1 =
+// 		    recvfrom (sock_other, message_other, SEND_SIZE, 0, (struct sockaddr *) &sin_other,
+// 		              (socklen_t*)&sin_len_other);
+// 		// if (len <= 0)
+// 		// {
+// 		// 	printf ("receive error\n");
+// 		// 	continue;
+// 		// }
+
+// 		pthread_mutex_lock (&mutex_pool);
+// 		if (len > 0)
+// 		{
+// 			memcpy (buffer_pool + tail, message, SEND_SIZE);
+// 			tail = tail + SEND_SIZE;
+// 			tail = tail % POOL_SIZE;
+// 			count_winsize += len;
+// 		}
+// 		if (len1 > 0)
+// 		{
+// 			memcpy (buffer_pool + tail, message_other, SEND_SIZE);
+// 			tail = tail + SEND_SIZE;
+// 			tail = tail % POOL_SIZE;
+// 			count_other += len1;
+// 		}
+// 		pthread_mutex_unlock (&mutex_pool);
+// 		usleep (1);
+// 	}
+	
 void *
 receive (void *arg)
 {
-	int sin_len, sin_len_other;
-	int port_winsize = 6666;
-	int port_other = 6667;
-	int sock, sock_other;
-	struct sockaddr_in sin_winsize, sin_other;
+	int sin_len;
+	char message[SEND_SIZE];
+	int sock;
+	struct sockaddr_in sin;
+	int port = 6666;
 
-	bzero (&sin_winsize, sizeof (sin_winsize));
-	sin_winsize.sin_family = AF_INET;
-	sin_winsize.sin_addr.s_addr = htonl (INADDR_ANY);
-	sin_winsize.sin_port = htons (port_winsize);
-	sin_len = sizeof (sin_winsize);
-
-	bzero (&sin_other, sizeof (sin_other));
-	sin_other.sin_family = AF_INET;
-	sin_other.sin_addr.s_addr = htonl (INADDR_ANY);
-	sin_other.sin_port = htons (port_other);
-	sin_len_other = sizeof (sin_other);
-
-	sock_other = socket (AF_INET, SOCK_DGRAM, 0);
-	bind (sock_other, (struct sockaddr *) &sin_other, sizeof (sin_other));
+	bzero (&sin, sizeof (sin));
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = htonl (INADDR_ANY);
+	sin.sin_port = htons (port);
+	sin_len = sizeof (sin);
 
 	sock = socket (AF_INET, SOCK_DGRAM, 0);
-	bind (sock, (struct sockaddr *) &sin_winsize, sizeof (sin_winsize));
+	bind (sock, (struct sockaddr *) &sin, sizeof (sin));
 	while (1)
 	{
-		char message[SEND_SIZE];
-		char message_other[SEND_SIZE];
 		while (1)
 		{
 			int len = 0;
 			memset (message, 0, SEND_SIZE);
 			len =
-			    recvfrom (sock, message, SEND_SIZE, 0, (struct sockaddr *) &sin_winsize,
+			    recvfrom (sock, message, SEND_SIZE, 0, (struct sockaddr *) &sin,
 			              (socklen_t*)&sin_len);
 			if (len <= 0)
 			{
 				printf ("receive error\n");
 				continue;
 			}
-			len =
-			    recvfrom (sock_other, message_other, SEND_SIZE, 0, (struct sockaddr *) &sin_other,
-			              (socklen_t*)&sin_len_other);
-			if (len <= 0)
-			{
-				printf ("receive error\n");
-				continue;
-			}
-
+			// printf("length is %d\n", len);
+			// f_print_string(message, 1024);
+			// process(message, len);
+			// packet_count += 1;
 			pthread_mutex_lock (&mutex_pool);
 			memcpy (buffer_pool + tail, message, SEND_SIZE);
 			tail = tail + SEND_SIZE;
 			tail = tail % POOL_SIZE;
-			memcpy (buffer_pool + tail, message_other, SEND_SIZE);
-			tail = tail + SEND_SIZE;
-			tail = tail % POOL_SIZE;
 			pthread_mutex_unlock (&mutex_pool);
+			// count_winsize += len;
 		}
-		usleep (1);
+		// printf("xxxs\n");
+		usleep (10);
 	}
 
 	close (sock);
 	// return (EXIT_SUCCESS);
 }
+void *
+receive1 (void *arg)
+{
+	int sin_len;
+	char message[SEND_SIZE];
+	int sock;
+	struct sockaddr_in sin;
+	int port = 6667;
+
+	bzero (&sin, sizeof (sin));
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = htonl (INADDR_ANY);
+	sin.sin_port = htons (port);
+	sin_len = sizeof (sin);
+
+	sock = socket (AF_INET, SOCK_DGRAM, 0);
+	bind (sock, (struct sockaddr *) &sin, sizeof (sin));
+	while (1)
+	{
+		while (1)
+		{
+			int len = 0;
+			memset (message, 0, SEND_SIZE);
+			len =
+			    recvfrom (sock, message, SEND_SIZE, 0, (struct sockaddr *) &sin,
+			              (socklen_t*)&sin_len);
+			if (len <= 0)
+			{
+				printf ("receive error\n");
+				continue;
+			}
+			// printf("length is %d\n", len);
+			// f_print_string(message, 1024);
+			// process(message, len);
+			// packet_count += 1;
+			pthread_mutex_lock (&mutex_pool);
+			memcpy (buffer_pool + tail, message, SEND_SIZE);
+			tail = tail + SEND_SIZE;
+			tail = tail % POOL_SIZE;
+			pthread_mutex_unlock (&mutex_pool);
+			// count_other += len;
+		}
+		// printf("xxxs\n");
+		usleep (10);
+	}
+
+	close (sock);
+	// return (EXIT_SUCCESS);
+}
+// 	close (sock);
+// 	// return (EXIT_SUCCESS);
+// }
 
 /**
  * g_mes_tn_process - Get string from buffer_pool and then pass it to
@@ -246,7 +359,7 @@ g_mes_tn_process (void *arg)
 			// process(buffer);
 			// printf("hhhh\n");
 		}
-		usleep (1);
+		usleep (10);
 	}
 }
 
@@ -280,12 +393,14 @@ process (char *buffer, int length)
 		value_enum = (enum data_category) value;
 		// if((packet_count % 1000) == 0)
 		// 	printf("packet received is %d %d\n",packet_count, packet_count1);
+		if (count_winsize % 10000 == 0)
+			printf("%d %d %d %d %d\n", count_winsize, count_iw, count_survey, count_queue, count_retrans);
 		switch (value_enum)
 		{
 		case WINSIZE:
-			// packet_count += 1;
 			decode_winsize (buffer + offset);
 			offset += sizeof (struct data_winsize) + 6;
+			count_winsize += 1;
 			break;
 		case DROPS:
 			decode_drops (buffer + offset);
@@ -294,10 +409,12 @@ process (char *buffer, int length)
 		case IW:
 			decode_iw (buffer + offset);
 			offset += sizeof (struct data_iw) + 6;
+			count_iw += 1;
 			break;
 		case QUEUE:
 			decode_queue (buffer + offset);
 			offset += sizeof (struct data_queue) + 6;
+			count_queue += 1;
 			break;
 		case BEACON:
 			decode_beacon (buffer + offset);
@@ -307,6 +424,7 @@ process (char *buffer, int length)
 			// packet_count1 += 1;
 			decode_survey (buffer + offset);
 			offset += sizeof (struct data_survey) + 6;
+			count_survey += 1;
 			break;
 		default:
 			out = 1;
@@ -621,103 +739,115 @@ void clear_flow_info(struct data_winsize *ptr)
 void ack_flow_info(struct data_winsize *ptr)
 {
 	int i = 0;
-	// int insert = 0;
-
+	int found = -1;
 	struct winsize_record *tmp = NULL;
-	for (i = 0; i < SEQLIST; i++)
+	// fprintf(fretrans, "%u\n", ptr->sequence);
+	if(ptr->datalength != 0)
 	{
-		int condition1 = 0, condition2 = 0;
-		int condition = 0;
-		tmp = flow_seq_list + i;
-		if (ptr->datalength != 0)
+		for (i = 0; i < SEQLIST; i++) //find the flow
 		{
+			int condition = 0;
+			tmp = flow_seq_list + i;
+			if(tmp->sec == 0) //empty, next.
+				continue;
 			condition = (tmp->ip_src == ptr->ip_src) + (tmp->ip_dst == ptr->ip_dst) +
-			            (tmp->sourceaddr == ptr->sourceaddr) + (tmp->destination == ptr->destination);
-			if (condition == 4)
+				            (tmp->sourceaddr == ptr->sourceaddr) + (tmp->destination == ptr->destination);
+			if (condition == 4) // find the flow.
 			{
-				int j = 0;
-				struct seq_info *insert_place = NULL;
-				struct seq_info *tmps = NULL;
-				for (j = 0; j < SEQLIST; j++) //found, insert, find retrans.
-				{
-					tmps = tmp->seq_list + j;
-					// printf("%d %d\n", j, tmps->seq);
-					if (tmps->seq == ptr->sequence) // found retrans, update sequence.
-					{
-						// __be64 time_tmp = 0;
-						// time_tmp = (__be64)ptr->sec * (__be64)1000000;
-						// time_tmp += (__be64)ptr->usec;
-						// fprintf(fretrans, "%d, %llu\n", 9, time_tmp);
-						pthread_mutex_lock(&mutex_rdata);
-						retrans_times[retrans_head].sec = ptr->sec;
-						retrans_times[retrans_head].usec = ptr->usec;
-						retrans_head += 1;
-						retrans_head = retrans_head % THUNDRED;
-						pthread_mutex_unlock(&mutex_rdata);
-						tmps->sec = ptr->sec;
-						tmps->usec = ptr->usec;
-						// insert = 1;
-						// printf("1111\n");
-						break;
-					}
-					else if (tmps->seq == -1) //find inset place.
-					{
-						if (insert_place == NULL)
-							insert_place = tmps;
-						// printf("2222\n");
-					}
-					else if (tmps->seq == 0) //no retrans, to the end.
-					{
-						if (insert_place == NULL)
-							insert_place = tmps;
-						// printf("3333\n");
-						break;
-					}
-
-				}
-				if (insert_place	!= NULL) // no retrans, should insert here.
-				{
-					insert_place->seq = ptr->sequence;
-					insert_place->sec = ptr->sec;
-					insert_place->usec = ptr->usec;
-					// insert = 1;
-				}
-				condition1 = 1;
-				if (condition2 == 1)
-					break;
-			}
-		}
-		else
-		{
-			condition1 = 1;
-		}
-		condition = (tmp->ip_src == ptr->ip_dst) + (tmp->ip_dst == ptr->ip_src) + //clear seq < r.ack
-		            (tmp->sourceaddr == ptr->destination) + (tmp->destination == ptr->sourceaddr);
-		if (condition == 4)
-		{
-			int j = 0;
-			int seq = ptr->ack_sequence;
-			struct seq_info *tmps = NULL;
-			tmp->ack_seq = seq;
-			for (j = 0; j < SEQLIST; j++)
-			{
-				tmps = tmp->seq_list + j;
-				if (tmps->seq <= seq)
-				{
-					tmps->seq = -1;
-					// tmps->sec = 0;
-					// tmps->usec = 0;
-				}
-			}
-			condition2 = 1;
-			if ((condition1 == 1) && (condition2 == 1))
+				found = i;
 				break;
+			}	
+		}
+		if(found > -1)//found the flow
+		{
+			struct seq_info *tmps = NULL;
+			int insert = 0;
+			tmp = flow_seq_list + found;
+			for(i = 0; i < SEQLIST; i++) // try to find sequence. if found, insert.
+			{
+				tmps = tmp->seq_list + i;
+				if(tmps->seq == -1)
+					continue;
+				if(tmps->seq == ptr->sequence) // find retrans
+				{
+					// __be64 time_tmp = 0;
+					// time_tmp = (__be64)tmps->sec * (__be64)1000000;
+					// time_tmp += (__be64)tmps->usec;
+					pthread_mutex_lock(&mutex_rdata);
+					retrans_times[retrans_head].sec = tmps->sec;
+					retrans_times[retrans_head].usec = tmps->usec;
+					retrans_head += 1;
+					retrans_head = retrans_head % THUNDRED;
+					pthread_mutex_unlock(&mutex_rdata);
+					count_retrans += 1;
+					tmps->sec = ptr->sec;
+					tmps->usec = ptr->usec;
+					insert = 1;
+				}
+			}
+			if(insert == 0)//not found, insert.
+			{
+				int insert_place = -1;
+				for(i = 0; i < SEQLIST; i++)
+				{
+					tmps = tmp->seq_list + i;
+					if((tmps->seq == 0) || (tmps->seq == -1))
+					{
+						insert_place = i;
+						break;
+					}
+				}
+				if(insert_place > -1)
+				{
+					tmps = tmp->seq_list + insert_place;
+					tmps->seq = ptr->sequence;
+					tmps->sec = ptr->sec;
+					tmps->usec = ptr->usec;
+				}
+				else //not found insert place, full.
+				{
+					printf("fuck\n");
+				}
+			}
+		}
+		else //no such flow, insert it.
+		{
+			insert_flow_info(ptr);
 		}
 	}
-	// if(insert == 0)
-	// {
-	// 	printf("insert error1\n");
-	// }
+	// check if there is reverse flow
+	found = -1;
+	for (i = 0; i < SEQLIST; i++)
+	{
+		int condition = 0;
+		tmp = flow_seq_list + i;
+		if(tmp->sec == 0) //empty, next.
+			continue;
+		condition = (tmp->ip_src == ptr->ip_dst) + (tmp->ip_dst == ptr->ip_src) + //clear seq < r.ack
+		            (tmp->sourceaddr == ptr->destination) + (tmp->destination == ptr->sourceaddr);
+		if (condition == 4) // find the flow.
+		{
+			found = i;
+			break;
+		}	
+	}
+	if(found > -1)//find the flow
+	{
+		struct seq_info *tmps = NULL;
+		tmp = flow_seq_list + found;
+		for(i = 0; i < SEQLIST; i++)
+		{
+			tmps = tmp->seq_list + i;
+			if((tmps->seq < ptr->ack_sequence) && ((ptr->sec - tmps->sec) > 5))
+			{
+				tmps->seq = 0;
+				tmps->sec = 0;
+				tmps->usec = 0;
+			}
+		}
+	}	
+	
+
 }
 /**
  * [decode_drops description]
@@ -899,14 +1029,14 @@ decode_iw (char *buf)
 		tlist = station_lists;
 		last = NULL;
 
-		while(tlist) // remove the old ones.
+		while (tlist) // remove the old ones.
 		{
-			if((rdata.sec - tlist->sec) > 10) //out of time item, delete.
+			if ((rdata.sec - tlist->sec) > 10) //out of time item, delete.
 			{
 				struct station_list *ptr = NULL;
-				if(tlist == station_lists) // head
+				if (tlist == station_lists) // head
 				{
-					if(station_lists == station_l_last) //only one, replace it.
+					if (station_lists == station_l_last) //only one, replace it.
 					{
 						free(station_lists);
 						station_l_last = NULL;
@@ -923,11 +1053,11 @@ decode_iw (char *buf)
 						continue; //alread tlist = tlist->next.
 					}
 				}
-				else if(tlist == station_l_last) // tail
+				else if (tlist == station_l_last) // tail
 				{
 					struct station_list *tmp1 = NULL, *pre = NULL;
 					tmp1 = station_lists;
-					while(tmp1 != station_l_last)
+					while (tmp1 != station_l_last)
 					{
 						pre = tmp1;
 						tmp1 = tmp1->next;
@@ -950,14 +1080,14 @@ decode_iw (char *buf)
 			tlist = tlist->next;
 		}
 		tlist = station_lists;
-		while(tlist) // insert.
+		while (tlist) // insert.
 		{
 			if (strcmp_linger((unsigned char *)tlist->station, (unsigned char *)rdata.station) == 0)
 			{
 				found = 1;
 				tlist->sec = rdata.sec;
 				break;
-			}			
+			}
 			tlist = tlist->next;
 		}
 		if (found == 0)
@@ -969,7 +1099,7 @@ decode_iw (char *buf)
 			memcpy(new->station, rdata.station, 6);
 			new->sec = rdata.sec;
 			new->next = NULL;
-			if(station_lists != NULL)
+			if (station_lists != NULL)
 			{
 				station_l_last->next = new;
 				station_l_last = new;
@@ -981,7 +1111,7 @@ decode_iw (char *buf)
 				station_lists->count = 1;
 				station_l_last = station_lists;
 			}
-		}	
+		}
 	}
 	// printf("IW: %.18s, %u, %u, %u, %u, %u, %u, %u, %u, %d, %d, %f\n",station, rdata.device, rdata.inactive_time, rdata.rx_bytes, rdata.rx_packets, rdata.tx_bytes, rdata.tx_packets, rdata.tx_retries, rdata.tx_failed, rdata.signal, rdata.signal_avg, expected_throughput);
 
@@ -1095,7 +1225,7 @@ decode_queue (char *buf)
 		}
 		pthread_mutex_unlock(&mutex_rdata);
 	}
-	else if(rdata.queue_id == (__u32)4294967295)
+	else if (rdata.queue_id == (__u32)4294967295)
 	{
 		struct data_queue_list *new = NULL;
 		int len = 0;
@@ -1182,14 +1312,14 @@ decode_beacon (char *buf)
 		int found = 0;
 		tlist = neibour_lists;
 		last = NULL;
-		while(tlist) // remove the old ones.
+		while (tlist) // remove the old ones.
 		{
-			if((beacon.sec - tlist->sec) > 10) //out of time item, delete.
+			if ((beacon.sec - tlist->sec) > 10) //out of time item, delete.
 			{
 				struct station_list *ptr = NULL;
-				if(tlist == neibour_lists) // head
+				if (tlist == neibour_lists) // head
 				{
-					if(neibour_lists == neibour_l_last) //only one, replace it.
+					if (neibour_lists == neibour_l_last) //only one, replace it.
 					{
 						free(neibour_lists);
 						neibour_l_last = NULL;
@@ -1206,11 +1336,11 @@ decode_beacon (char *buf)
 						continue; //alread tlist = tlist->next.
 					}
 				}
-				else if(tlist == neibour_l_last) // tail
+				else if (tlist == neibour_l_last) // tail
 				{
 					struct station_list *tmp1 = NULL, *pre;
 					tmp1 = neibour_lists;
-					while(tmp1 != neibour_l_last)
+					while (tmp1 != neibour_l_last)
 					{
 						pre = tmp1;
 						tmp1 = tmp1->next;
@@ -1233,14 +1363,14 @@ decode_beacon (char *buf)
 			tlist = tlist->next;
 		}
 		tlist = neibour_lists;
-		while(tlist) // insert.
+		while (tlist) // insert.
 		{
 			if (strcmp_linger((unsigned char *)tlist->station, (unsigned char *)beacon.bssid) == 0)
 			{
 				found = 1;
 				tlist->sec = beacon.sec;
 				break;
-			}			
+			}
 			tlist = tlist->next;
 		}
 		if (found == 0)
@@ -1252,7 +1382,7 @@ decode_beacon (char *buf)
 			memcpy(new->station, beacon.bssid, 6);
 			new->sec = beacon.sec;
 			new->next = NULL;
-			if(neibour_lists != NULL)
+			if (neibour_lists != NULL)
 			{
 				neibour_l_last->next = new;
 				neibour_l_last = new;
@@ -1264,7 +1394,7 @@ decode_beacon (char *buf)
 				neibour_lists->count = 1;
 				neibour_l_last = neibour_lists;
 			}
-		}	
+		}
 	}
 	pthread_mutex_unlock(&mutex_rdata);
 	/**
@@ -1634,7 +1764,7 @@ void *format_data(void *arg)
 
 			}
 		}
-		if((survey_p_last == NULL) || (queue_p_last_3 == NULL))
+		if ((survey_p_last == NULL) || (queue_p_last_3 == NULL))
 			continue;
 		// time_current = getcurrenttime();
 		// printf("duration is %llu %u %u\n", time_current - time_last, retrans_head, retrans_tail);
@@ -1643,7 +1773,7 @@ void *format_data(void *arg)
 		if (retrans_head > retrans_tail) // read and update tail.
 		{
 			time_tp = retrans_times[retrans_tail];
-			if((time_tp.sec < queue_p_last_3->sec) && (time_tp.sec < survey_p_last->sec))
+			if ((time_tp.sec < queue_p_last_3->sec) && (time_tp.sec < survey_p_last->sec))
 			{
 				retrans_tail += 1;
 				retrans_tail = retrans_tail % THUNDRED;
@@ -1664,28 +1794,28 @@ void *format_data(void *arg)
 
 		if (time_tp.sec == 0)
 		{
-			
+
 			pthread_mutex_lock(&mutex_rdata);
-			if(winsize_head > winsize_tail)
+			if (winsize_head > winsize_tail)
 				amount = winsize_head - winsize_tail;
 			else
 				amount = winsize_head > winsize_tail + THUNDRED;
 			pthread_mutex_unlock(&mutex_rdata);
-			while(amount > 0)
+			while (amount > 0)
 			{
 				pthread_mutex_lock(&mutex_rdata);
 				time_tp = winsize_times[winsize_tail];
-				if((time_tp.sec < queue_p_last_3->sec) && (time_tp.sec < survey_p_last->sec))
+				if ((time_tp.sec < queue_p_last_3->sec) && (time_tp.sec < survey_p_last->sec))
 				{
 					winsize_tail += 1;
 					winsize_tail = winsize_tail % THUNDRED;
 					amount -= 1;
 				}
 				else
-				{	
+				{
 					pthread_mutex_unlock(&mutex_rdata);
-					break;				
-				}			
+					break;
+				}
 				pthread_mutex_unlock(&mutex_rdata);
 				if (time_tp.sec) //compute statistic when time_tp
 				{
@@ -1802,14 +1932,14 @@ void *format_data(void *arg)
 						int stations = 0;
 						int duration = 0;
 						struct time_structure tmp, tmp1;
-						if(s_keep.sec > q_keep_3.sec)
+						if (s_keep.sec > q_keep_3.sec)
 						{
 							tmp.sec = q_keep_3.sec;
 							tmp.usec = q_keep_3.usec;
 						}
 						else if (s_keep.sec == q_keep_3.sec)
 						{
-							if(s_keep.usec > q_keep_3.usec)
+							if (s_keep.usec > q_keep_3.usec)
 							{
 								tmp.sec = q_keep_3.sec;
 								tmp.usec = q_keep_3.usec;
@@ -1828,11 +1958,11 @@ void *format_data(void *arg)
 						pthread_mutex_lock(&mutex_rdata);
 						tmp1 = winsize_times[winsize_tail];
 						duration = ((int)tmp1.sec - (int)tmp.sec) + ((int)tmp1.usec - (int)tmp.usec) * 1000000;
-						while((duration < 0) && amount > 0)
+						while ((duration < 0) && amount > 0)
 						{
 							winsize_tail += 1;
 							winsize_tail = winsize_tail % THUNDRED;
-							if(winsize_head > winsize_tail)
+							if (winsize_head > winsize_tail)
 								amount = winsize_head - winsize_tail;
 							else
 								amount = winsize_head > winsize_tail + THUNDRED;
@@ -1840,9 +1970,9 @@ void *format_data(void *arg)
 							duration = ((int)tmp1.sec - (int)tmp.sec) + ((int)tmp1.usec - (int)tmp.usec) * 1000000;
 						}
 						pthread_mutex_unlock(&mutex_rdata);
-						if(neibour_lists)
+						if (neibour_lists)
 							neibours = neibour_lists->count;
-						if(station_lists)
+						if (station_lists)
 							stations = station_lists->count;
 						fprintf(fretrans, "%d, %u, %u, %u, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f\n",
 						        drop, drop_count, neibours, stations, s_keep.time_busy, s_keep.time_ext_busy,
@@ -1855,7 +1985,7 @@ void *format_data(void *arg)
 					}
 				}
 			}
-			
+
 		}
 		if (time_tp.sec) //compute statistic when time_tp
 		{
@@ -1970,9 +2100,9 @@ void *format_data(void *arg)
 				//         queue_global_3.drops, queue_global_3.requeues, queue_global_3.overlimits);
 				int neibours = 0;
 				int stations = 0;
-				if(neibour_lists)
+				if (neibour_lists)
 					neibours = neibour_lists->count;
-				if(station_lists)
+				if (station_lists)
 					stations = station_lists->count;
 				fprintf(fretrans, "%d, %u, %u, %u, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f\n",
 				        drop, drop_count, neibours, stations, s_keep.time_busy, s_keep.time_ext_busy,
@@ -1994,7 +2124,7 @@ void *format_data(void *arg)
 void
 start_threads (void)
 {
-	pthread_t tid1, tid2, tid3;
+	pthread_t tid1, tid2, tid3, tid4;
 	int err = 0;
 
 	char buf[128];
@@ -2101,7 +2231,12 @@ start_threads (void)
 		printf ("receive creation failed \n");
 		exit (1);
 	}
-
+	err = pthread_create (&tid4, NULL, receive1, NULL);
+	if (err != 0)
+	{
+		printf ("receive creation failed \n");
+		exit (1);
+	}
 	err = pthread_create (&tid2, NULL, g_mes_tn_process, NULL);
 	if (err != 0)
 	{
@@ -2351,7 +2486,7 @@ f_write_string (char *str, int length)
 	//         exit(-1);
 	//     }
 	// }
-	fwrite (str, sizeof (char), length, fp);
+	fwrite (str, sizeof (char), length, fp_winsize);
 }
 
 int

@@ -1,7 +1,7 @@
 
 enum data_category {WINSIZE = 1, DROPS, IW, QUEUE, BEACON, SURVEY, KEEP_IW, KEEP_BEACON};
 enum found_results {FOUND_SAME = 1, FOUND_DIFF, NOT_FOUND};
-
+#define SEQLIST 10000
 struct dp_packet
 {
   __u32 ip_src;
@@ -16,7 +16,6 @@ struct dp_packet
   __u16 dpl;
   __u16 pad;
   __u32 in_time;
-  // struct dp_packet *next;
   __u32 pad2;
   __u32 pad1;
 };
@@ -27,6 +26,7 @@ struct dp_packet
 *  is its transmission version, there is a transformation
 * between this two data structrues.
 */
+
 struct data_iw
 {
   char station[6];
@@ -43,11 +43,9 @@ struct data_iw
   __s32 signal;
   __s32 signal_avg;
   __u32 expected_throughput;
-  struct data_iw *next;
   __u32 pad2;
-  // __u32 pad;
+  __u32 pad;
 };
-
 
 // struct data_iw_mac
 // {
@@ -154,6 +152,7 @@ struct data_survey_c
 * it has *next mumber to record neibour APs informations
 * is transmission version of beacon informations.
 */
+
 struct data_beacon
 {
   __be32 sec;
@@ -165,10 +164,8 @@ struct data_beacon
   __u8 pad;
   __u8 bssid[6];
   __u32 pad2;
-  // struct data_beacon *next;
   __u32 pad1;
 };
-
 
 struct data_beacon_mac
 {
@@ -256,7 +253,7 @@ struct winsize_record
   __be32 ip_dst;
   __be16 sourceaddr;
   __be16 destination;
-  struct seq_info seq_list[100];
+  struct seq_info seq_list[SEQLIST];
   __be32 ack_seq;
   __be32 sec;
   // __be32 usec;
