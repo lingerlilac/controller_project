@@ -125,6 +125,12 @@ struct time_structure
   __u32 sec;
   __u32 usec;
 };
+struct drop_time
+{
+  __u32 sec;
+  __u32 usec;
+  __u32 count;
+};
 struct data_survey_c
 {
   __u8  mac[6];

@@ -22,7 +22,7 @@ typedef _Bool bool;
 #define POOL_SIZE 10240000
 // #define BUFFER_STORE 10000
 #define SEQLIST 100
-#define HUNDRED 100
+#define THUNDRED 10000
 /**
  * fp is the file pointer to write information in.
  */
@@ -57,20 +57,23 @@ struct data_survey_computed survey_global;
 /**
  * used to record current stations.
  */
-struct station_list *station_lists;
+struct station_list *station_lists = NULL, *station_l_last = NULL;
 __u32 drop_count = 0;
+struct drop_time last_100_ms_drop;
 /**
  * Structures and variables for APIs.
  */
 /**
  * record #stations
  */
-struct station_list *neibour_lists;
+struct station_list *neibour_lists = NULL, *neibour_l_last = NULL;
 __u32 neibour_count = 0;
-struct time_structure retrans_times[HUNDRED];
+struct time_structure retrans_times[THUNDRED];
 int retrans_head = 0;
 int retrans_tail = 0;
-struct data_winsize winsize_global;
+struct time_structure winsize_times[THUNDRED];
+int winsize_head = 0;
+int winsize_tail = 0;
 // struct data_beacon_processed *beacon_buffer[BUFFER_STORE];
 // struct data_iw_processed *iw_buffer[BUFFER_STORE];
 // // struct data_queue_processed     *queue_buffer[BUFFER_STORE];
@@ -398,7 +401,10 @@ decode_winsize (char *buf)
 	rdata.flags = rdata.flags & 0x0017;
 	cal_windowsize = rdata.windowsize;
 	pthread_mutex_lock(&mutex_rdata);
-	winsize_global = rdata;
+	winsize_times[winsize_head].sec = rdata.sec;
+	winsize_times[winsize_head].usec = rdata.usec;
+	winsize_head += 1;
+	winsize_head = winsize_head % THUNDRED;
 	pthread_mutex_unlock(&mutex_rdata);
 
 	if (rdata.flags == 2 || rdata.flags == 18)
@@ -646,7 +652,7 @@ void ack_flow_info(struct data_winsize *ptr)
 						retrans_times[retrans_head].sec = ptr->sec;
 						retrans_times[retrans_head].usec = ptr->usec;
 						retrans_head += 1;
-						retrans_head = retrans_head % HUNDRED;
+						retrans_head = retrans_head % THUNDRED;
 						pthread_mutex_unlock(&mutex_rdata);
 						tmps->sec = ptr->sec;
 						tmps->usec = ptr->usec;
@@ -735,6 +741,7 @@ decode_drops (char *buf)
 	char mac_addr[18];
 	unsigned char mac[6];
 	__be64 timex = 0;
+	__be64 timetmp = 0;
 
 	memset (ip_src, 0, 20);
 	memset (ip_dst, 0, 20);
@@ -773,7 +780,16 @@ decode_drops (char *buf)
 	fprintf (fp, "%d, %lld, %.18s, %s, %s, %u, %u, %u, %u, %u, %u, %u\n", DROPS, timex, mac_addr,
 	         srcip, ip_src, rdata.port_src, rdata.port_dst, rdata.sequence,
 	         rdata.ack_sequence, rdata.in_time, rdata.dpl, rdata.drop_count);
-	drop_count += 1;
+	timetmp = last_100_ms_drop.sec;
+	timetmp = timetmp * 1000000;
+	timetmp += last_100_ms_drop.usec;
+	if ((timex - timetmp) >= 900000)
+	{
+		drop_count = rdata.drop_count - last_100_ms_drop.count;
+		last_100_ms_drop.sec = rdata.sec;
+		last_100_ms_drop.usec = rdata.usec;
+		last_100_ms_drop.count = rdata.drop_count;
+	}
 	// pthread_mutex_lock(&mutex_data);
 	// struct data_dropped_processed *tmp;
 	// tmp = dropped_buffer[dbend];
@@ -869,37 +885,79 @@ decode_iw (char *buf)
 		int len = sizeof(struct station_list);
 		tlist = (struct station_list *)malloc(len);
 		memset(tlist, 0, len);
-		memcpy(tlist->station, mac, 6);
+		memcpy(tlist->station, rdata.station, 6);
 		tlist->sec = rdata.sec;
 		tlist->next = NULL;
 		tlist->count = 1;
 		station_lists = tlist;
+		station_l_last = station_lists;
 	}
 	else
 	{
 		struct station_list *tlist = NULL, *last = NULL;
 		int found = 0;
 		tlist = station_lists;
-		while (tlist)
+		last = NULL;
+
+		while(tlist) // remove the old ones.
 		{
-			if (strcmp_linger((unsigned char *)tlist->station, mac) == 0)
+			if((rdata.sec - tlist->sec) > 10) //out of time item, delete.
 			{
-				found = 1;
-			}
-			else
-			{
-				if ((rdata.sec - tlist->sec) > 1)
+				struct station_list *ptr = NULL;
+				if(tlist == station_lists) // head
 				{
-					struct station_list *curr = NULL;
-					curr = tlist;
-					last->next = tlist->next;
-					free(curr);
-					curr = NULL;
-					neibour_lists->count -= 1;
-					tlist = last;
+					if(station_lists == station_l_last) //only one, replace it.
+					{
+						free(station_lists);
+						station_l_last = NULL;
+						station_lists = NULL;
+						break; //done
+					}
+					else
+					{
+						ptr = tlist;
+						tlist = tlist->next;
+						station_lists = tlist;
+						free(ptr);
+						ptr = NULL;
+						continue; //alread tlist = tlist->next.
+					}
+				}
+				else if(tlist == station_l_last) // tail
+				{
+					struct station_list *tmp1 = NULL, *pre = NULL;
+					tmp1 = station_lists;
+					while(tmp1 != station_l_last)
+					{
+						pre = tmp1;
+						tmp1 = tmp1->next;
+					}
+					pre->next = NULL;
+					free(station_l_last);
+					station_l_last = pre;
+					break; //done
+				}
+				else // middle
+				{
+					ptr = tlist;
+					tlist = tlist->next;
+					last->next = tlist;
+					free(ptr);
+					ptr = NULL;
 				}
 			}
 			last = tlist;
+			tlist = tlist->next;
+		}
+		tlist = station_lists;
+		while(tlist) // insert.
+		{
+			if (strcmp_linger((unsigned char *)tlist->station, (unsigned char *)rdata.station) == 0)
+			{
+				found = 1;
+				tlist->sec = rdata.sec;
+				break;
+			}			
 			tlist = tlist->next;
 		}
 		if (found == 0)
@@ -908,12 +966,22 @@ decode_iw (char *buf)
 			int len = sizeof(struct station_list);
 			new = (struct station_list *)malloc(len);
 			memset(new, 0, len);
-			memcpy(new->station, mac, 6);
+			memcpy(new->station, rdata.station, 6);
 			new->sec = rdata.sec;
 			new->next = NULL;
-			last->next = new;
-			station_lists->count += 1;
-		}
+			if(station_lists != NULL)
+			{
+				station_l_last->next = new;
+				station_l_last = new;
+				station_lists->count += 1;
+			}
+			else
+			{
+				station_lists = new;
+				station_lists->count = 1;
+				station_l_last = station_lists;
+			}
+		}	
 	}
 	// printf("IW: %.18s, %u, %u, %u, %u, %u, %u, %u, %u, %d, %d, %f\n",station, rdata.device, rdata.inactive_time, rdata.rx_bytes, rdata.rx_packets, rdata.tx_bytes, rdata.tx_packets, rdata.tx_retries, rdata.tx_failed, rdata.signal, rdata.signal_avg, expected_throughput);
 
@@ -1027,7 +1095,7 @@ decode_queue (char *buf)
 		}
 		pthread_mutex_unlock(&mutex_rdata);
 	}
-	else
+	else if(rdata.queue_id == (__u32)4294967295)
 	{
 		struct data_queue_list *new = NULL;
 		int len = 0;
@@ -1106,32 +1174,73 @@ decode_beacon (char *buf)
 		tlist->next = NULL;
 		tlist->count = 1;
 		neibour_lists = tlist;
+		neibour_l_last = neibour_lists;
 	}
 	else
 	{
 		struct station_list *tlist = NULL, *last = NULL;
 		int found = 0;
 		tlist = neibour_lists;
-		while (tlist)
+		last = NULL;
+		while(tlist) // remove the old ones.
 		{
-			if (strcmp_linger((unsigned char *)tlist->station, mac) == 0)
+			if((beacon.sec - tlist->sec) > 10) //out of time item, delete.
 			{
-				found = 1;
-			}
-			else
-			{
-				if ((beacon.sec - tlist->sec) > 1)
+				struct station_list *ptr = NULL;
+				if(tlist == neibour_lists) // head
 				{
-					struct station_list *curr = NULL;
-					curr = tlist;
-					last->next = tlist->next;
-					free(curr);
-					curr = NULL;
-					neibour_lists->count -= 1;
-					tlist = last;
+					if(neibour_lists == neibour_l_last) //only one, replace it.
+					{
+						free(neibour_lists);
+						neibour_l_last = NULL;
+						neibour_lists = NULL;
+						break; //done
+					}
+					else
+					{
+						ptr = tlist;
+						tlist = tlist->next;
+						neibour_lists = tlist;
+						free(ptr);
+						ptr = NULL;
+						continue; //alread tlist = tlist->next.
+					}
+				}
+				else if(tlist == neibour_l_last) // tail
+				{
+					struct station_list *tmp1 = NULL, *pre;
+					tmp1 = neibour_lists;
+					while(tmp1 != neibour_l_last)
+					{
+						pre = tmp1;
+						tmp1 = tmp1->next;
+					}
+					pre->next = NULL;
+					free(neibour_l_last);
+					neibour_l_last = pre;
+					break; //done
+				}
+				else // middle
+				{
+					ptr = tlist;
+					tlist = tlist->next;
+					last->next = tlist;
+					free(ptr);
+					ptr = NULL;
 				}
 			}
 			last = tlist;
+			tlist = tlist->next;
+		}
+		tlist = neibour_lists;
+		while(tlist) // insert.
+		{
+			if (strcmp_linger((unsigned char *)tlist->station, (unsigned char *)beacon.bssid) == 0)
+			{
+				found = 1;
+				tlist->sec = beacon.sec;
+				break;
+			}			
 			tlist = tlist->next;
 		}
 		if (found == 0)
@@ -1140,12 +1249,22 @@ decode_beacon (char *buf)
 			int len = sizeof(struct station_list);
 			new = (struct station_list *)malloc(len);
 			memset(new, 0, len);
-			memcpy(new->station, mac, 6);
+			memcpy(new->station, beacon.bssid, 6);
 			new->sec = beacon.sec;
 			new->next = NULL;
-			last->next = new;
-			neibour_lists->count += 1;
-		}
+			if(neibour_lists != NULL)
+			{
+				neibour_l_last->next = new;
+				neibour_l_last = new;
+				neibour_lists->count += 1;
+			}
+			else
+			{
+				neibour_lists = new;
+				neibour_lists->count = 1;
+				neibour_l_last = neibour_lists;
+			}
+		}	
 	}
 	pthread_mutex_unlock(&mutex_rdata);
 	/**
@@ -1290,16 +1409,17 @@ void *format_data(void *arg)
 		int drop = 0;
 		struct data_queue *new = NULL, *last = NULL;
 		struct data_survey *new_survey = NULL, *s_last = NULL;
-		struct data_queue_computed *newitem_queue_3 = NULL, *newitem_queue_f = NULL;
+		struct data_queue_computed *newitem_queue_3 = NULL;
+		struct data_queue_computed*newitem_queue_f = NULL;
 		struct data_survey_computed *newitem_survey = NULL;
 
 		memset(&time_tp, 0, sizeof(struct time_structure));
 		pthread_mutex_lock(&mutex_rdata);
 		new = &(queue_list_3->queue);
 		last = &(queue_list_last_3->queue);
-		
 
-		if((last != NULL) && (new != NULL))
+
+		if ((last != NULL) && (new != NULL))
 		{
 			d1 = (int)(last->sec) - (int)(new->sec);
 			d2 = (int)(last->usec) - (int)(new->usec);
@@ -1325,7 +1445,7 @@ void *format_data(void *arg)
 			ptr = NULL;
 		}
 		pthread_mutex_unlock(&mutex_rdata);
-		if(newitem_queue_3 != NULL)
+		if (newitem_queue_3 != NULL)
 		{
 			// printf("1111\n");
 			if (queue_p_buffer_3 == NULL) //null, create
@@ -1372,7 +1492,7 @@ void *format_data(void *arg)
 		new = &(queue_list_f->queue);
 		last = &(queue_list_last_f->queue);
 
-		if((last != NULL) && (new != NULL))
+		if ((last != NULL) && (new != NULL))
 		{
 			d1 = (int)(last->sec) - (int)(new->sec);
 			d2 = (int)(last->usec) - (int)(new->usec);
@@ -1399,7 +1519,7 @@ void *format_data(void *arg)
 			ptr = NULL;
 		}
 		pthread_mutex_unlock(&mutex_rdata);
-		if(newitem_queue_f != NULL)
+		if (newitem_queue_f != NULL)
 		{
 			if (queue_p_buffer_f == NULL) //null, create
 			{
@@ -1444,11 +1564,11 @@ void *format_data(void *arg)
 		pthread_mutex_lock(&mutex_rdata);
 		new_survey = &(survey_list->survey);
 		s_last = &(survey_list_last->survey);
-		if((s_last != NULL) && (new_survey != NULL))
+		if ((s_last != NULL) && (new_survey != NULL))
 		{
 			duration = (float)(s_last->time - new_survey->time);
 		}
-		
+
 		if (duration >= 900) //statisfy compute condition, compute
 		{
 			struct data_survey_list *ptr = NULL;
@@ -1470,7 +1590,7 @@ void *format_data(void *arg)
 			ptr = NULL;
 		}
 		pthread_mutex_unlock(&mutex_rdata);
-		if(newitem_survey != NULL)
+		if (newitem_survey != NULL)
 		{
 			if (survey_p_buffer == NULL) //null, create
 			{
@@ -1511,13 +1631,23 @@ void *format_data(void *arg)
 
 			}
 		}
+		if((survey_p_last == NULL) || (queue_p_last_3 == NULL))
+			continue;
 		pthread_mutex_lock(&mutex_rdata);
 		if (retrans_head > retrans_tail) // read and update tail.
 		{
 			time_tp = retrans_times[retrans_tail];
-			retrans_tail += 1;
-			retrans_tail = retrans_tail % HUNDRED;
-			drop = 1;
+			if((time_tp.sec < queue_p_last_3->sec) && (time_tp.sec < survey_p_last->sec))
+			{
+				retrans_tail += 1;
+				retrans_tail = retrans_tail % THUNDRED;
+				drop = 1;
+			}
+			else
+			{
+				time_tp.sec = 0;
+				time_tp.usec = 0;
+			}
 		}
 		else
 		{
@@ -1528,19 +1658,35 @@ void *format_data(void *arg)
 
 		if (time_tp.sec == 0)
 		{
-			struct data_winsize winsize_tmp;
 			pthread_mutex_lock(&mutex_rdata);
-			winsize_tmp = winsize_global; // read winsize_global and del.
-			memset(&winsize_global, 0, sizeof(struct data_winsize));
+			if(winsize_head > winsize_tail)
+			{
+				time_tp = winsize_times[winsize_tail];
+				if((time_tp.sec < queue_p_last_3->sec) && (time_tp.sec < survey_p_last->sec))
+				{
+					winsize_tail += 1;
+					winsize_tail = winsize_tail % THUNDRED;
+				}
+				else
+				{	
+					pthread_mutex_unlock(&mutex_rdata);
+					continue;				
+				}
+			}
+			else
+			{	
+				pthread_mutex_unlock(&mutex_rdata);
+				continue;
+			}
 			pthread_mutex_unlock(&mutex_rdata);
-			time_tp.sec = winsize_tmp.sec;
-			time_tp.usec = winsize_tmp.usec;
 		}
 		if (time_tp.sec) //compute statistic when time_tp
 		{
-			struct data_queue_computed *q_tmp_3 = NULL, *q_tmp_f = NULL, *q_wait_to_del = NULL;
+			struct data_queue_computed *q_tmp_3 = NULL,  *q_wait_to_del = NULL;
+			struct data_queue_computed *q_tmp_f = NULL;
 			struct data_survey_computed *s_tmp = NULL, *s_wait_to_del = NULL;
-			struct data_queue_computed q_keep_3, q_keep_f;
+			struct data_queue_computed q_keep_3;
+			struct data_queue_computed q_keep_f;
 			struct data_survey_computed s_keep;
 
 			// memset(&q_keep_3, 0, sizeof(struct data_queue_computed));
@@ -1549,7 +1695,7 @@ void *format_data(void *arg)
 				continue;
 			if (survey_p_buffer == NULL)
 				continue;
-			if(queue_p_buffer_f == NULL)
+			if (queue_p_buffer_f == NULL)
 				continue;
 			q_tmp_3 = queue_p_buffer_3;
 			q_tmp_f = queue_p_buffer_f;
@@ -1557,12 +1703,12 @@ void *format_data(void *arg)
 
 			while (q_tmp_3) // search time, above,
 			{
-				if (time_tp.sec <= q_tmp_3->sec) // find state after it.
+				if ((time_tp.sec < q_tmp_3->sec) || ((time_tp.sec == q_tmp_3->sec) && (time_tp.usec <= q_tmp_3->usec))) // find state after it.
 				{
 					q_keep_3 = *q_tmp_3;
 					break;
 				}
-				else if ((time_tp.sec - q_tmp_3->sec) > 2) // delte old data.
+				else if ((time_tp.sec - q_tmp_3->sec) > 10) // delte old data.
 				{
 					q_wait_to_del = q_tmp_3;
 				}
@@ -1584,12 +1730,12 @@ void *format_data(void *arg)
 			q_wait_to_del = NULL;
 			while (q_tmp_f) // search time, above,
 			{
-				if (time_tp.sec <= q_tmp_f->sec)
+				if ((time_tp.sec < q_tmp_f->sec) || ((time_tp.sec == q_tmp_f->sec) && (time_tp.usec <= q_tmp_f->usec)))
 				{
 					q_keep_f = *q_tmp_f;
 					break;
 				}
-				else if ((time_tp.sec - q_tmp_f->sec) > 2) // delte old data.
+				else if ((time_tp.sec - q_tmp_f->sec) > 10) // delte old data.
 				{
 					q_wait_to_del = q_tmp_f;
 				}
@@ -1610,12 +1756,12 @@ void *format_data(void *arg)
 			}
 			while (s_tmp)
 			{
-				if (time_tp.sec <= s_tmp->sec)
+				if ((time_tp.sec < s_tmp->sec) || ((time_tp.sec == s_tmp->sec) && (time_tp.usec <= s_tmp->usec)))
 				{
 					s_keep = *s_tmp;
 					break;
 				}
-				else if ((time_tp.sec - s_tmp->sec) > 2)
+				else if ((time_tp.sec - s_tmp->sec) > 10)
 				{
 					s_wait_to_del = s_tmp;
 				}
@@ -1636,6 +1782,7 @@ void *format_data(void *arg)
 				}
 				survey_p_buffer = s_wait_to_del;
 			}
+			// printf("abc %u %u\n", s_keep.sec, q_keep_3.sec);
 			if ((s_keep.sec != 0) && (q_keep_3.sec != 0))
 			{
 				// fprintf(fretrans, "%d %u, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %f, %.4f, %.4f, %f, %f, %.4f, %.4f, %.4f\n",
@@ -1644,17 +1791,23 @@ void *format_data(void *arg)
 				//         2412, (float)survey_global.noise, queue_global_3.bytes,
 				//         queue_global_3.packets, queue_global_3.qlen, queue_global_3.backlog,
 				//         queue_global_3.drops, queue_global_3.requeues, queue_global_3.overlimits);
-				printf("%d %u, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %f, %.4f, %.4f, %f, %f, %.4f, %.4f, %.4f, %.4f, %.4f, %f, %f, %.4f, %.4f, %.4f\n",
-				       drop, drop_count, s_keep.time_busy, s_keep.time_ext_busy,
-				       s_keep.time_rx, s_keep.time_tx, s_keep.time_scan,
-				       2412, (float)s_keep.noise, q_keep_3.bytes,
-				       q_keep_3.packets, q_keep_3.qlen, q_keep_3.backlog,
-				       q_keep_3.drops, q_keep_3.requeues, q_keep_3.overlimits, q_keep_f.bytes,
-				       q_keep_f.packets, q_keep_f.qlen, q_keep_f.backlog,
-				       q_keep_f.drops, q_keep_f.requeues, q_keep_f.overlimits);
+				int neibours = 0;
+				int stations = 0;
+				if(neibour_lists)
+					neibours = neibour_lists->count;
+				if(station_lists)
+					stations = station_lists->count;
+				fprintf(fretrans, "%d, %u, %u, %u, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f\n",
+				        drop, drop_count, neibours, stations, s_keep.time_busy, s_keep.time_ext_busy,
+				        s_keep.time_rx, s_keep.time_tx, s_keep.time_scan,
+				        2412, (float)s_keep.noise, q_keep_3.bytes,
+				        q_keep_3.packets, q_keep_3.qlen, q_keep_3.backlog,
+				        q_keep_3.drops, q_keep_3.requeues, q_keep_3.overlimits,
+				        q_keep_f.bytes, q_keep_f.packets, q_keep_f.qlen, q_keep_f.backlog,
+				        q_keep_f.drops, q_keep_f.requeues, q_keep_f.overlimits);
 			}
 		}
-		usleep(100);
+		usleep(10000);
 	}
 }
 void

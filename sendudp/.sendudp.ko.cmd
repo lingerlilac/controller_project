@@ -1,0 +1,1 @@
+cmd_/home/lin/working/sendudp/sendudp.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /home/lin/working/sendudp/sendudp.ko /home/lin/working/sendudp/sendudp.o /home/lin/working/sendudp/sendudp.mod.o
