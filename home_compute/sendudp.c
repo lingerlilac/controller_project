@@ -374,6 +374,7 @@ void print_iwlist(struct data_iw *ptr, char *str);
 void print_mac(char *addr);
 void mac_tranADDR_toString_r(unsigned char* addr, char* str, size_t size);
 int strcmp_linger(char *s, char *t);
+int strcmp_n(char *s, char *t, int n);
 void reversebytes_uint32t(__u32 *value);
 void reversebytes_uint16t(__u16 *value);
 int send_msg(int8_t *pbuf, uint16_t len);
@@ -436,8 +437,8 @@ static void recv_cb(struct sk_buff *skb)
     {
         nlh = nlmsg_hdr(skb);
         data = NLMSG_DATA(nlh);
-        printk(KERN_DEBUG "111 %s %d\n", (char *)data, !strcmp(data, "states"));
-        if(!strcmp(data, "states"))
+        // printk(KERN_DEBUG "111 %s\n", (char *)data);
+        if(!strcmp_n(data, "states", 6))
         {
         	struct apstates apstat, tmp1, tmp2;
     		int i = 0;
@@ -447,7 +448,7 @@ static void recv_cb(struct sk_buff *skb)
     		int duration = 0;
     		int maxqlen = 0;
     		int maxbacklog = 0;
-    		printk(KERN_DEBUG "insidestates\n");
+    		// printk(KERN_DEBUG "insidestates\n");
     		i = aps_head;
     		i = i - 1;
     		i = i + APSL;
@@ -515,7 +516,7 @@ static void recv_cb(struct sk_buff *skb)
 	    		buf = NULL;
 	    	}
         }
-        else if(!strcmp(data, "flowss"))
+        else if(!strcmp_n(data, "flowss", 6))
         {
         	struct tcp_flow *tmp = NULL;
         	int i = 0;
@@ -524,7 +525,7 @@ static void recv_cb(struct sk_buff *skb)
         		int length = 0;
         		char *str = NULL;
         		tmp = flow_linger + i;
-                printk(KERN_DEBUG "%llu %u", tmp->packets, tmp->sec);
+                // printk(KERN_DEBUG "%llu %u", tmp->packets, tmp->sec);
         		length = sizeof(struct tcp_flow);
         		str = (char *)kmalloc(sizeof(char) * length, GFP_KERNEL);
         		memset(str, 0, length);
@@ -1473,5 +1474,18 @@ int strcmp_linger(char *s, char *t)
 	return (condition == 6) ? 0 : 1;
 }
 
+int strcmp_n(char *s, char *t, int n)
+{
+    int i = 0;
+    int condition = 0;
+    for (i = 0; i < n; i++)
+    {
+        int tmp = 1000;
+        tmp = (int) * (s + i) - (int) * (t + i);
+        if (tmp == 0)
+            condition += 1;
+    }
+    return (condition == n) ? 0 : 1;
+}
 module_init(hello_init);
 module_exit(hello_exit);

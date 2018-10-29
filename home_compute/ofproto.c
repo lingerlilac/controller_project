@@ -330,8 +330,8 @@ int main_linger(void)
 {
   char *data = "flows";
   char *data1 = "states";
-  char *data2 = "maxras";
-  char *data3 = "flooss";
+  // char *data2 = "maxras";
+  // char *data3 = "flooss";
   struct sockaddr_nl  local, dest_addr;
 
   struct nlmsghdr *nlh = NULL;
@@ -344,10 +344,9 @@ int main_linger(void)
   struct flow_info flowin;
   char mac_addr[18];
   // int i;
-
+  VLOG_INFO("1");
   struct treenode* search_results = NULL;
 
-  VLOG_INFO("1");
   if(skfd < 0)
   {
     skfd = socket(AF_NETLINK, SOCK_RAW, USER_MSG);
@@ -357,7 +356,6 @@ int main_linger(void)
       destroy_everything();
       return -1;
     }
-
     memset(&local, 0, sizeof(local));
     local.nl_family = AF_NETLINK;
     local.nl_pid = 50;
@@ -365,7 +363,7 @@ int main_linger(void)
     if (bind(skfd, (struct sockaddr *)&local, sizeof(local)) != 0)
     {
       VLOG_INFO("bind() error\n");
-      close(skfd);
+      // close(skfd);
       destroy_everything();
       return -1;
     }
@@ -377,7 +375,6 @@ int main_linger(void)
   dest_addr.nl_family = AF_NETLINK;
   dest_addr.nl_pid = 0; // to kernel
   dest_addr.nl_groups = 0;
-  VLOG_INFO("3");
   nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MAX_PLOAD));
   memset(nlh, 0, sizeof(struct nlmsghdr));
   nlh->nlmsg_len = NLMSG_SPACE(MAX_PLOAD);
@@ -386,18 +383,17 @@ int main_linger(void)
   nlh->nlmsg_seq = 0;
   nlh->nlmsg_pid = local.nl_pid; //self port
 
-
+VLOG_INFO("3");
 
   memcpy(NLMSG_DATA(nlh), data1, strlen(data1));
   ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
-  VLOG_INFO("4");
   if (!ret)
   {
     perror("sendto error1\n");
-    close(skfd);
+    // close(skfd);
    	return -1;
   }
-
+VLOG_INFO("4");
   memset(&info, 0, sizeof(info));
   ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, (socklen_t*)sizeof(dest_addr));
   memset(ret_none, 0, 10);
@@ -405,7 +401,7 @@ int main_linger(void)
   VLOG_INFO("5");
   if (!strcmp(ret_none, "nonedata"))
   {
-    VLOG_INFO("3331111111111111111111111111111111%s\n", ret_none);
+    VLOG_INFO("nonedata %s\n", ret_none);
   }
   else
   {
@@ -451,13 +447,12 @@ int main_linger(void)
     fstates[overlimits].value = ((float)overlimits * times);
     assign_string(&fstates[overlimits] , "overlimits");
 
-    for (i = 0; i < 14; i++)
-    {
-      VLOG_INFO("%s: %f\t", fstates[i].name, fstates[i].value);
-      if(!(i % 4))
-        VLOG_INFO("\n");
-    }
-    VLOG_INFO("xdfd\n");
+    // for (i = 0; i < 14; i++)
+    // {
+    //   VLOG_INFO("%s: %f\t", fstates[i].name, fstates[i].value);
+    //   if(!(i % 4))
+    //     VLOG_INFO("\n");
+    // }
 
     search_results = bst_search(tnode, fstates, 14);
 
@@ -465,21 +460,17 @@ int main_linger(void)
     if (search_results)
     {
       struct tcp_flow max_flow;
-      VLOG_INFO("in search_results");
       memset(&max_flow, 0, sizeof(struct tcp_flow));
-      VLOG_INFO("%s\n", data);
       memcpy(NLMSG_DATA(nlh), data, strlen(data));
       ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
 
       if (!ret)
       {
         perror("sendto error1\n");
-        close(skfd);
+        // close(skfd);
         destroy_everything();
         return -1;
       }
-      else
-        VLOG_INFO("fuckyou");
       for (i = 0; i < FLOWS_KEEP; i++)
       {
         
@@ -527,7 +518,11 @@ int main_linger(void)
         }
         // else
       }
-      
+      if(skfd > -1)
+      {
+        close(skfd);
+        skfd = -1;
+      }
       // memcpy(NLMSG_DATA(nlh), data2, strlen(data2));
       // ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
       // if (!ret)
@@ -568,24 +563,24 @@ int main_linger(void)
       VLOG_INFO("not found111\n");
     destroy_item_list(fstates);
   }
-  VLOG_INFO("6");
   if (!ret)
   {
     perror("recv form kernel error\n");
-    close(skfd);
+    // close(skfd);
     destroy_everything();
     return -1;
   }
-
+  VLOG_INFO("6");
   if (search_results)
   {
-    VLOG_INFO("found\n");
+    // VLOG_INFO("found\n");
   }
   else
     VLOG_INFO("not found\n");
-  close(skfd);
+  // close(skfd);
   free((void *)nlh);
   destroy_everything();
+  VLOG_INFO("7");
   return 0;
 
 }
@@ -632,7 +627,7 @@ int init_linger_m(char * inputtxt)
   int i = 0;
   str = inputtxt;
   p = strtok_r(str, split, &outer_ptr);
-  VLOG_INFO("%s\n", inputtxt);
+  // VLOG_INFO("%s\n", inputtxt);
   while (p != NULL)
   {
     char * tmp = NULL;
@@ -681,17 +676,17 @@ int init_linger_m(char * inputtxt)
     }
     p = strtok_r(NULL, split, &outer_ptr);
   }
-  print_rawdata(node);
+  // print_rawdata(node);
 
   tnode = create_tree(node);
-  print_tree(tnode);
-  VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
+  // print_tree(tnode);
+  // VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
   parameters = get_parameters(node);
-  while (parameters[i])
-  {
-    VLOG_INFO("%d: %s\t", i, parameters[i]);
-    i = i + 1;
-  }
+  // while (parameters[i])
+  // {
+  //   VLOG_INFO("%d: %s\t", i, parameters[i]);
+  //   i = i + 1;
+  // }
 
   return 0;
 }
@@ -760,14 +755,14 @@ int init_linger(char * inputtxt, char * item)
     p = strtok_r(NULL, split, &outer_ptr);
   }
   tnode = create_tree(node);
-  print_tree(tnode);
-  VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
+  // print_tree(tnode);
+  // VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
   parameters = get_parameters(node);
-  while (parameters[i])
-  {
-    VLOG_INFO("%d: %s\t", i, parameters[i]);
-    i = i + 1;
-  }
+  // while (parameters[i])
+  // {
+  //   VLOG_INFO("%d: %s\t", i, parameters[i]);
+  //   i = i + 1;
+  // }
   for (i = 0; i < ITEM_AMOUNT; i++)
   {
     // memset(items_list[i], 0, sizeof(struct item_value));
@@ -775,13 +770,13 @@ int init_linger(char * inputtxt, char * item)
     items_list[i].value = -1000000.0;
   }
   create_items(items_list, item);
-  for (i = 0; i < ITEM_AMOUNT; i++)
-  {
-    if (items_list[i].name == NULL)
-      break;
-    VLOG_INFO("name %s value %f\n", items_list[i].name, items_list[i].value);
-    // i = i + 1;
-  }
+  // for (i = 0; i < ITEM_AMOUNT; i++)
+  // {
+  //   if (items_list[i].name == NULL)
+  //     break;
+  //   VLOG_INFO("name %s value %f\n", items_list[i].name, items_list[i].value);
+  //   // i = i + 1;
+  // }
 
   return 0;
 }
@@ -4288,6 +4283,16 @@ handle_echo_request(struct ofconn *ofconn, const struct ofp_header *oh)
   return 0;
 }
 
+static enum ofperr handle_experimenter(struct ofconn *ofconn, const struct ofp_header *oh, struct ofpbuf *msg)
+{
+    // struct station_information station;
+    // int tmp = 0;
+    // struct nl_msg *msg;
+    // tmp = print_survey_handler(msg, NULL, &station);
+    // VLOG_INFO("abc1111111111 %lu\t%lu\n", station.s_active_time, station.s_busy_time);
+    handle_msg(msg);
+    return 0;
+}
 void handle_msg(const struct ofpbuf *msg)
 {
   	// struct iw * iwlist = NULL;
@@ -4319,9 +4324,11 @@ void handle_msg(const struct ofpbuf *msg)
   // strcpy(msg_rec, length - 1);
   memcpy(msg_rec, (char *)msg->data + 16, length - 1);
   // msg_rec[length - 1] = '\0';
-  VLOG_INFO("msg_rec is %s\n", msg_rec);
+  // VLOG_INFO("msg_rec is %s\n", msg_rec);
 	  init_linger_m(msg_rec);
 	  main_linger();
+    // close(skfd);
+    // skfd = -1;
 	  // handle_tree(msg_rec);
 	  // iwlist = process(msg_rec);
 	  // print_iwlist(iwlist);
@@ -9166,9 +9173,9 @@ OVS_EXCLUDED(ofproto_mutex)
     // VLOG_INFO("msg_size is %d", ofpbuf_msgsize(msg));
     // VLOG_INFO("msg msg is %s\n", msg->msg);
 
-    handle_msg(msg);
+    // handle_msg(msg);
     // handle_msg();
-    // return handle_experimenter(ofconn, oh);
+    return handle_experimenter(ofconn, oh, msg);
   case OFPTYPE_FEATURES_REQUEST:
     return handle_features_request(ofconn, oh);
 
