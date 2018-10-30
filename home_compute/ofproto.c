@@ -239,6 +239,7 @@ int ppp(int port_linger, char *ip_linger);
 int check_cwnd(int sock, char *ip_src, char *ip_dst, __be16 src_port, __be16 dst_port);
 void reversebytes_uint16t(__u16 *value);
 void handle_msg(const struct ofpbuf *msg);
+void reversebytes_be16t(__be16 *value);
 // void handle_msg(void);
 
 struct treenode *tnode = NULL;
@@ -272,6 +273,10 @@ void reversebytes_uint32t(__u32 *value)
            (*value & 0x00FF0000U) >> 8 | (*value & 0xFF000000U) >> 24;
 }
 void reversebytes_uint16t(__u16 *value)
+{
+  *value = (*value & 0x00FF) << 8 | (*value & 0xFF00) >> 8;
+}
+void reversebytes_be16t(__be16 *value)
 {
   *value = (*value & 0x00FF) << 8 | (*value & 0xFF00) >> 8;
 }
@@ -491,20 +496,23 @@ VLOG_INFO("4");
 
         char ip_src[20];
         char ip_dst[20];
-        // reversebytes_uint16t(max_flow.sourceaddr);
-        // reversebytes_uint16t(max_flow.destination);
+        char ip_src1[20];
+        reversebytes_be16t(&(max_flow.sourceaddr));
+        reversebytes_be16t(&(max_flow.destination));
         int port = max_flow.sourceaddr;
         int window = 0;
         unsigned char *ptr_uc = NULL;
         memset(ip_src, 0, 20);
         memset(ip_dst, 0, 20);
-        // reversebytes_uint32t(&max_flow.ip_src);
-        // reversebytes_uint32t(&max_flow.ip_dst);
+        memset(ip_src1, 0, 20);
+        reversebytes_uint32t(&(max_flow.ip_src));
+        reversebytes_uint32t(&(max_flow.ip_dst));
         ptr_uc = (unsigned char *) &max_flow.ip_src;
         sprintf (ip_src, "%u.%u.%u.%u", ptr_uc[3], ptr_uc[2], ptr_uc[1], ptr_uc[0]);
+        sprintf (ip_src1, "%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
         ptr_uc = (unsigned char *) &max_flow.ip_dst;
         sprintf (ip_dst, "%u.%u.%u.%u", ptr_uc[3], ptr_uc[2], ptr_uc[1], ptr_uc[0]);
-         VLOG_INFO("44444444 %s %d", ip_src, port);
+         VLOG_INFO("3210 %s, 0123 %s %d", ip_src, ip_src1, port);
 
 
         if (sock > 0)
