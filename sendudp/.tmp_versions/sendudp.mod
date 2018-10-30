@@ -1,2 +1,2 @@
-/home/lin/working/sendudp/sendudp.ko
-/home/lin/working/sendudp/sendudp.o
+/home/lin/working/controller_project/sendudp/sendudp.ko
+/home/lin/working/controller_project/sendudp/sendudp.o

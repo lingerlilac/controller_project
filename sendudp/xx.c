@@ -17,11 +17,8 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define BUFF_SIZE 1000 //buffer size in openvswitch/datapath/flow.c
 #define SEND_SIZE 1024 //send buffer size
 #define B_S 	1024 /*public buffer size*/
-#define APSL 	250 // length of apstates_global.
-#define NETLINK_USER  22
-#define USER_MSG    (NETLINK_USER + 1)
-#define USER_PORT   50
-#define FLOWS_KEEP 10
+
+
 int control_beacon = 0; // used to control the send rate of buffer informations
 static 	struct timer_list tm; // used to periodly send informations
 struct 	timeval oldtv; // used to get current time
@@ -40,59 +37,6 @@ __u16 SURVEY = 6;
 __u16 KEEP_IW = 7;
 __u16 KEEP_BEACON = 8;
 
-/**
- * This data structure is used to represent flow information got in flow.c
- */
-struct tcp_flow
-{
-    __be32 ip_src;
-    __be32 ip_dst;
-    __be16 sourceaddr;
-    __be16 destination;
-    __u16 winsize;
-    __u16 wscale;
-    __u32 sec;
-    __u32 usec;
-    __u64 packets;
-};
-
-/**
- * Used to get the max rate link, calculate link status
- */
-struct iw_record
-{
-	char station[6];
-	__u32 sec;
-	__u32 usec;
-	__u64 bytes;
-	__u32 rates;
-	__u16 computed;
-};
-/**
- * Used to get current ap state.
- */
-struct apstates
-{
-    __u32 sec;
-    __u32 usec;
-    __u32 drop_count;
-    __u64 time;
-    __u64 time_busy;
-    __u64 time_ext_busy;
-    __u64 time_rx;
-    __u64 time_tx;
-    __u64 time_scan;
-    __s8 noise;
-    __u8 stations;
-    __u32 packets;
-    __u64 bytes;
-    __u32 qlen;
-    __u32 backlog;
-    __u32 drops;
-    __u32 requeues;
-    __u32 overlimits;
-    __u16 pad;   
-};
 /*
 * dp_packet is a structure used to record data packet that dropped in mac80211 or
 * queue algorithms, it has an extra struct dp_packet *next member than ,
@@ -282,15 +226,7 @@ struct keep_beacon
 	__u16 pad;
 };
 
-struct flow_info
-{
-	__be16 port;
-	__u32 snd_cwnd;
-	__u32 srtt_us;
-	__u32 mdev_us;
-	__u32 timein;
-	__u32 mss_linger;
-};
+
 /*
 * iwlist_last is a iw data chain that stores data of last transmission.
 * when new iw informations generated, they are stored and waiting for
@@ -302,7 +238,7 @@ struct flow_info
 * beacon informations.
 */
 struct 	data_iw 		*iwlist_last = NULL;
-// struct 	data_queue 		queue_last[6];
+struct 	data_queue 		*queue_last  = NULL;
 struct 	data_beacon 	*beacon_last = NULL;
 struct socket *sock_global;
 char mac_global[6];
@@ -326,15 +262,6 @@ long last_usec_drop_mac = 0;
 
 long last_sec_drop_queue = 0;
 long last_usec_drop_queue = 0;
-
-/**
- * used to record current ap states.
- */
-struct apstates apstates_global[APSL];
-int aps_head = 0;
-int aps_tail = 0;
-int count_iw = 0;
-struct iw_record iw_rec[10];
 /*
 * The following functions are global functions from status.c, scan.c in mac80211,
 * codel.h and sch_fq_codel.c.
@@ -349,11 +276,6 @@ extern void 	destroy_after_transmitted_codel(void);
 extern void 	destroy_after_transmitted_mac80211(void);
 extern struct data_queue queue_global[6];
 struct data_queue queue_previous[6];
-extern struct tcp_flow flow_linger[FLOWS_KEEP];
-
-// extern struct flow_info flows[5];
-struct iw_record maxrateflow;
-EXPORT_SYMBOL_GPL(maxrateflow);
 
 void write_2_public_buffer(void *data, int length);
 void send_the_buffer(void);
@@ -374,210 +296,6 @@ void print_iwlist(struct data_iw *ptr, char *str);
 void print_mac(char *addr);
 void mac_tranADDR_toString_r(unsigned char* addr, char* str, size_t size);
 int strcmp_linger(char *s, char *t);
-int strcmp_n(char *s, char *t, int n);
-void reversebytes_uint32t(__u32 *value);
-void reversebytes_uint16t(__u16 *value);
-int send_msg(int8_t *pbuf, uint16_t len);
-static void recv_cb(struct sk_buff *skb);
-
-
-struct netlink_kernel_cfg cfg = 
-{
-    .input = recv_cb,
-};
-
-void reversebytes_uint32t(__u32 *value)
-{
-  *value = (*value & 0x000000FFU) << 24 | (*value & 0x0000FF00U) << 8 | 
-    (*value & 0x00FF0000U) >> 8 | (*value & 0xFF000000U) >> 24;
-}
-void reversebytes_uint16t(__u16 *value)
-{
-    *value = (*value & 0x00FF) << 8 |(*value & 0xFF00) >> 8;
-}
-
-static struct sock *netlinkfd = NULL;
-
-int send_msg(int8_t *pbuf, uint16_t len)
-{
-    struct sk_buff *nl_skb;
-    struct nlmsghdr *nlh;
-
-    int ret;
-
-    nl_skb = nlmsg_new(len, GFP_ATOMIC);
-    if(!nl_skb)
-    {
-        printk("netlink_alloc_skb error\n");
-        return -1;
-    }
-
-    nlh = nlmsg_put(nl_skb, 0, 0, USER_MSG, len, 0);
-    if(nlh == NULL)
-    {
-        printk("nlmsg_put() error\n");
-        nlmsg_free(nl_skb);
-        return -1;
-    }
-    memcpy(nlmsg_data(nlh), pbuf, len);
-
-    ret = netlink_unicast(netlinkfd, nl_skb, USER_PORT, MSG_DONTWAIT);
-
-    return ret;
-}
-
-
-static void recv_cb(struct sk_buff *skb)
-{
-    struct nlmsghdr *nlh = NULL;
-    void *data = NULL;
-
-    // printk("skb->len:%u %u\n", skb->len,  nlmsg_total_size(0));
-    if(skb->len >= nlmsg_total_size(0))
-    {
-        nlh = nlmsg_hdr(skb);
-        data = NLMSG_DATA(nlh);
-        // printk(KERN_DEBUG "111 %s\n", (char *)data);
-        if(!strcmp_n(data, "states", 6))
-        {
-        	struct apstates apstat, tmp1, tmp2;
-    		int i = 0;
-    		int len_tmp_del = 0, k = 0;
-    		int dur_sur = 0;
-    		char * buf = NULL;
-    		int duration = 0;
-    		int maxqlen = 0;
-    		int maxbacklog = 0;
-    		// printk(KERN_DEBUG "insidestates\n");
-    		i = aps_head;
-    		i = i - 1;
-    		i = i + APSL;
-    		i = i % APSL;
-    		memset(&tmp1, 0, sizeof(struct apstates));
-    		memset(&tmp2, 0, sizeof(struct apstates));
-    		tmp2 = apstates_global[i];
-    		tmp1 = apstates_global[aps_tail];
-    		duration = ((int)tmp2.sec - (int)tmp1.sec) * 1000 + ((int)tmp2.usec - (int)tmp1.usec) / 1000;
-    		// printk(KERN_DEBUG "%u %u %u %u %d\n", tmp2.sec, tmp1.sec, tmp2.usec, tmp1.usec, xyz);
-    		len_tmp_del = (aps_head - aps_tail + APSL) % APSL;
-    		for(k = 0; k < len_tmp_del; k++)
-    		{
-    			struct apstates xyztmp;
-    			int ind = 0;
-    			ind = k % APSL;
-    			xyztmp = apstates_global[ind];
-    			if (xyztmp.backlog > maxbacklog)
-    			{
-    				maxqlen = xyztmp.qlen;
-    				maxbacklog = xyztmp.backlog;
-    			}
-    		}
-    		// duration = xyz;
-    		dur_sur = ((int)tmp2.time - (int)tmp1.time);
-    		if((duration == 0) || (dur_sur == 0))
-    		{
-    			char data[]="nonedata";
-    			send_msg(data,nlmsg_len(nlh));
-    			printk(KERN_DEBUG "divide zero %d %d %d %u %u %u %u\n", aps_head, aps_tail, i, tmp2.sec, tmp1.sec, tmp2.usec, tmp1.usec);
-    		}
-    		else
-    		{
-    			int length = 0;
-    			int times = 1000000; //times is used because float is not supported in kernel space.
-    			length = sizeof(struct apstates);
-	    		apstat.drop_count = ((tmp2.drop_count - tmp1.drop_count) * times) / duration;
-	    		
-	    		apstat.time_busy = (times * (tmp2.time_busy - tmp1.time_busy)) / dur_sur;
-	    		apstat.time_ext_busy = (times * (tmp2.time_ext_busy - tmp1.time_ext_busy)) / dur_sur;
-	    		apstat.time_rx = (times * (tmp2.time_rx - tmp1.time_rx)) / dur_sur;
-	    		apstat.time_tx = (times * (tmp2.time_tx - tmp1.time_tx)) / dur_sur;
-	    		apstat.time_scan = (times * (tmp2.time_scan - tmp1.time_scan)) /dur_sur;
-	    		apstat.noise = tmp2.noise;
-	    		apstat.packets = (times * (tmp2.packets - tmp1.packets)) / duration;
-	    		apstat.bytes = (times * (tmp2.bytes - tmp1.bytes)) / duration;
-	    		apstat.qlen = maxqlen;
-	    		apstat.backlog = maxbacklog;
-	    		apstat.drops = (times * (tmp2.drops - tmp1.drops)) / duration;
-	    		apstat.requeues = (times * (tmp2.requeues - tmp1.requeues)) / duration;
-	    		apstat.overlimits = (times * (tmp2.overlimits - tmp1.overlimits)) / duration;
-	    		apstat.sec = tmp2.sec;
-	    		apstat.usec = tmp2.usec;
-	    		apstat.stations = tmp2.stations;
-	    		buf = (char *)kmalloc(length, GFP_KERNEL);
-	    		memset(buf, 0, length);
-	    		apstat.sec = 1000;
-	    		apstat.usec = 100;
-	    		memcpy(buf, &apstat, length);
-	    		// printk(KERN_DEBUG "W %u %u %u %llu %llu %llu %lu\n", apstat.sec, apstat.usec, apstat.drop_count, apstat.time, apstat.time_busy, apstat.time_ext_busy, sizeof(struct apstates));
-
-	    		// printk(KERN_DEBUG "11%u %u %u %llu %llu %llu, %d %u %u\n", apstat.sec, apstat.usec, apstat.drop_count, apstat.time, apstat.time_busy, apstat.time_ext_busy, length, duration, dur_sur);
-	    		send_msg(buf, nlmsg_len(nlh));
-	    		kfree(buf);
-	    		buf = NULL;
-	    	}
-        }
-        else if(!strcmp_n(data, "flowss", 6))
-        {
-        	struct tcp_flow *tmp = NULL;
-        	int i = 0;
-        	for(i = 0; i < FLOWS_KEEP; i++)
-        	{
-        		int length = 0;
-        		char *str = NULL;
-        		tmp = flow_linger + i;
-                // printk(KERN_DEBUG "%llu %u", tmp->packets, tmp->sec);
-        		length = sizeof(struct tcp_flow);
-        		str = (char *)kmalloc(sizeof(char) * length, GFP_KERNEL);
-        		memset(str, 0, length);
-        		memcpy(str, tmp, length);
-        		send_msg(str, nlmsg_len(nlh));
-        		kfree(str);
-        		str = NULL;
-        	}
-        }
-        // else if (!strcmp(data, "maxras"))
-        // {
-        // 	struct iw_record tmp;
-        // 	int length = 0;
-        // 	char * strtosend = NULL;
-        // 	char mac_addr[18];
-        // 	mac_tranADDR_toString_r(maxrateflow.station, mac_addr, 18);
-
-        // 	printk(KERN_DEBUG "%llu %slinger_fk\n", maxrateflow.bytes, mac_addr);
-        // 	length = sizeof(struct iw_record);
-        // 	strtosend = (char *)kmalloc(sizeof(char) * length, GFP_KERNEL);
-        // 	tmp = maxrateflow;
-        // 	memcpy(strtosend, &tmp, length);
-        // 	send_msg(strtosend, nlmsg_len(nlh));
-        // 	kfree(strtosend);
-        // 	memset(&maxrateflow, 0, sizeof(struct iw_record));
-        // 	strtosend = NULL;
-        // }
-        // else if (!strcmp(data, "flooss"))
-        // {
-        // 	struct flow_info *tmp;
-        // 	int length = 0;
-        // 	char * strtosend = NULL;
-        // 	int i = 0;
-        // 	int length_flow_info = 0;
-        // 	length_flow_info = sizeof(struct flow_info) * sizeof(char);
-        // 	length = sizeof(struct flow_info) * 5;
-        // 	printk(KERN_DEBUG "length is %d\n", length);
-        // 	strtosend = (char *)kmalloc(sizeof(char) * length, GFP_KERNEL);
-        // 	memset(strtosend, 0, sizeof(char) * length);
-        // 	for(i = 0; i < 5; i++)
-        // 	{
-	       //  	tmp = flows + i;
-	       //  	memcpy(strtosend + i * length_flow_info, tmp, length_flow_info);
-	       //  }
-        // 	send_msg(strtosend, nlmsg_len(nlh));
-        // 	kfree(strtosend);
-        // 	strtosend = NULL;
-        // }
-    }
-} 
-
-
 /**
  * [mac_tranADDR_toString_r u8 address[6] to "01:2b:4c:5d:6a:7e"]
  * @linger
@@ -946,14 +664,8 @@ void compare_and_iwlist(struct data_iw *ptr, struct data_survey *sur)
 {
 	struct data_iw 	*tmp = NULL;
 	struct ds_t 	s_t;
-	struct apstates *tmp_aps = NULL;
-	int count = 0;
-	int i = 0;
-	int duration = 0;
-	tmp_aps = apstates_global + aps_head;
 	memset(&s_t, 0, sizeof(struct ds_t));
 	tmp = ptr;
-
 	/**
 	 * processing survey information.
 	 */
@@ -971,7 +683,7 @@ void compare_and_iwlist(struct data_iw *ptr, struct data_survey *sur)
 		write_2_public_buffer(&s_t, sizeof(struct ds_t));
 		last_usec_survey = s_t.survey.usec;
 	}
-	
+
 	while (tmp)
 	{
 		struct di_t t;
@@ -980,7 +692,6 @@ void compare_and_iwlist(struct data_iw *ptr, struct data_survey *sur)
 		memcpy(&(t.mac), mac_global, 6);
 		t.iw = *tmp;
 		t.iw.next = NULL;
-		count += 1;
 		if(t.iw.sec > last_sec_iw)
 		{
 			write_2_public_buffer(&t, sizeof(struct di_t));
@@ -993,85 +704,8 @@ void compare_and_iwlist(struct data_iw *ptr, struct data_survey *sur)
 			last_usec_iw = t.iw.usec;
 		}
 		
-		// if((count_iw % 50) == 0)
-		// {
-		// 	char mac_addr[18];
-		// 	i = 0;
-		// 	// printk(KERN_DEBUG "heree");
-		// 	mac_tranADDR_toString_r(tmp->station, mac_addr, 18);
-		// 	for(i = 0; i < 10; i++)
-		// 	{
-		// 		struct iw_record *xtmp = NULL;
-		// 		xtmp = iw_rec + i;
-		// 		if(xtmp->sec == 0)
-		// 		{
-		// 			memcpy(xtmp->station, tmp->station, 6);
-		// 			xtmp->sec = tmp->sec;
-		// 			xtmp->usec = tmp->usec;
-		// 			xtmp->bytes = tmp->tx_bytes;
-		// 			xtmp->computed = 2;
-		// 			// printk(KERN_DEBUG "heree %u %d %u\n", tmp->sec, i, iw_rec[i].sec);
-		// 			break;
-		// 		}
-		// 		else if ((strcmp_linger(xtmp->station, tmp->station) == 0))
-		// 		{	
-		// 			__u32 duration = 0;
-		// 			if(tmp->usec >= xtmp->usec)
-		// 			{
-		// 				__u32 rate = 0;
-		// 				duration = tmp->usec - xtmp->usec;
-		// 				duration = duration / 1000;
-		// 				duration = duration + (tmp->sec - xtmp->sec) * 1000;
-		// 				rate = 1000 * (tmp->tx_bytes - xtmp->bytes) / duration;
-		// 				xtmp->rates = rate;
-		// 				xtmp->computed = 1;
-		// 				xtmp->sec = tmp->sec;
-		// 				xtmp->usec = tmp->usec;
-		// 				xtmp->bytes = tmp->tx_bytes;
-		// 			}
-		// 			else
-		// 			{
-		// 				__u32 rate = 0;
-		// 				duration = xtmp->usec - tmp->sec;
-		// 				duration = duration / 1000;
-		// 				duration = (tmp->sec - xtmp->sec) * 1000 - duration;
-		// 				rate = 1000 * (tmp->tx_bytes - xtmp->bytes) / duration;
-		// 				xtmp->rates = rate;	
-		// 				xtmp->computed = 1;	
-		// 				xtmp->sec = tmp->sec;
-		// 				xtmp->usec = tmp->usec;
-		// 				xtmp->bytes = tmp->tx_bytes;				
-		// 			}
-		// 			// printk(KERN_DEBUG "heree %s %u\n", mac_addr, xtmp->rates);
-		// 			if(xtmp->rates >= maxrateflow.rates)
-		// 			{
-		// 				maxrateflow = *xtmp;
-		// 			}
-		// 			// printk(KERN_DEBUG "here2");
-		// 			break;
-		// 		}
-		// 	}
-
-		// }
 		tmp = tmp->next;
 	}
-	i = 0;
-	duration = (int)s_t.survey.sec;
-	for(i = 0; i < 10; i++)
-	{
-		struct iw_record *xtmp = NULL;
-		int duration1 = 0;
-		xtmp = iw_rec + i;
-		
-		duration1 = duration - (int)xtmp->sec;
-		if(duration1 > 2)
-		{
-			memset(xtmp, 0, sizeof(struct iw_record));
-		}
-	}
-	count_iw += 1;
-	count_iw = count_iw % 500000;
-	tmp_aps->stations = count;
 }
 /**
  * Check whether to transmit current queue information got.
@@ -1081,63 +715,66 @@ void compare_and_iwlist(struct data_iw *ptr, struct data_survey *sur)
  */
 // void compare_and_queue(struct data_queue *ptr)
 // {
-// 	int i = 0;
-// 	int condition = 0;
-// 	struct apstates *tmp;
-// 	tmp = apstates_global + aps_head;
-	
-// 	for(i = 0; i < 6; i++)
+// 	// int condition = 0;
+// 	// condition = (queue_last->queue_id 	== ptr->queue_id) 	+
+// 	//             (queue_last->qlen 		== ptr->qlen) 		+
+// 	//             (queue_last->backlog 	== ptr->backlog) 	+
+// 	//             (queue_last->drops 		== ptr->drops) 		+
+// 	//             (queue_last->requeues 	== ptr->requeues) 	+
+// 	//             (queue_last->overlimits == ptr->overlimits);
+// 	// condition = 5;
+// 	// if (condition != 6)
+// 	// {
+// 	// 	struct dq_t t;
+// 	// 	memset(&t, 0, sizeof(struct dq_t));
+// 	// 	t.category = QUEUE;
+// 	// 	t.queue.queue_id 	= ptr->queue_id;
+// 	// 	t.queue.bytes 		= ptr->bytes;
+// 	// 	t.queue.packets 	= ptr->packets;
+// 	// 	t.queue.qlen 		= ptr->qlen;
+// 	// 	t.queue.backlog 	= ptr->backlog;
+// 	// 	t.queue.drops 		= ptr->drops;
+// 	// 	t.queue.requeues 	= ptr->requeues;
+// 	// 	t.queue.overlimits 	= ptr->overlimits;
+// 	// 	t.queue.sec 		= ptr->sec;
+// 	// 	t.queue.usec		= ptr->usec;
+// 	// 	memcpy(&(t.mac), mac_global, 6);
+// 	// 	if(t.queue.sec > last_sec_queue)
+// 	// 	{
+// 	// 		write_2_public_buffer(&t, sizeof(struct dq_t));
+// 	// 		last_sec_queue = t.queue.sec;
+// 	// 		last_usec_queue = t.queue.usec;
+// 	// 	}
+// 	// 	else if ((t.queue.sec == last_sec_queue) && (t.queue.usec > last_usec_queue))
+// 	// 	{
+// 	// 		write_2_public_buffer(&t, sizeof(struct dq_t));
+// 	// 		last_usec_queue = t.queue.usec;
+// 	// 	}
+		
+// 	// 	*queue_last = *ptr;
+// 	// }
+// 	if(ptr->bytes != 0)
 // 	{
-// 		// if(i < 5)
-// 		// {
-// 			tmp->packets += (ptr + i)->packets;
-// 			tmp->bytes += (ptr + i)->bytes;
-// 			tmp->qlen += (ptr + i)->qlen;
-// 			tmp->backlog += (ptr + i)->backlog;
-// 			tmp->drops += (ptr + i)->drops;
-// 			tmp->requeues += (ptr + i)->requeues;
-// 			tmp->overlimits += (ptr + i)->overlimits;
-// 		// }
-// 		condition = (queue_last[i].queue_id 	== (ptr + i)->queue_id) 	+
-// 		            (queue_last[i].qlen 		== (ptr + i)->qlen) 		+
-// 		            (queue_last[i].backlog 		== (ptr + i)->backlog) 	+
-// 		            (queue_last[i].drops 		== (ptr + i)->drops) 		+
-// 		            (queue_last[i].requeues 	== (ptr + i)->requeues) 	+
-// 		            (queue_last[i].overlimits  	== (ptr + i)->overlimits);
-
-// 		if (condition != 6)
-// 		{
-// 			struct dq_t t;
-// 			memset(&t, 0, sizeof(struct dq_t));
-// 			t.category = QUEUE;
-// 			t.queue.queue_id 	= (ptr + i)->queue_id;
-// 			t.queue.bytes 		= (ptr + i)->bytes;
-// 			t.queue.packets 	= (ptr + i)->packets;
-// 			t.queue.qlen 		= (ptr + i)->qlen;
-// 			t.queue.backlog 	= (ptr + i)->backlog;
-// 			t.queue.drops 		= (ptr + i)->drops;
-// 			t.queue.requeues 	= (ptr + i)->requeues;
-// 			t.queue.overlimits 	= (ptr + i)->overlimits;
-// 			t.queue.sec 		= (ptr + i)->sec;
-// 			t.queue.usec		= (ptr + i)->usec;
-// 			memcpy(&(t.mac), mac_global, 6);
-// 			// if(t.queue.sec > last_sec_queue)
-// 			// {
-// 			// 	write_2_public_buffer(&t, sizeof(struct dq_t));
-// 			// 	last_sec_queue = t.queue.sec;
-// 			// 	last_usec_queue = t.queue.usec;
-// 			// }
-// 			// else if ((t.queue.sec == last_sec_queue) && (t.queue.usec > last_usec_queue))
-// 			// {
-// 			// 	write_2_public_buffer(&t, sizeof(struct dq_t));
-// 			// 	last_usec_queue = t.queue.usec;
-// 			// }
-// 			write_2_public_buffer(&t, sizeof(struct dq_t));
-// 			// *queue_last = *ptr;
-// 		}
-// 		queue_last[i] = *(ptr + i);
+// 		struct dq_t t;
+// 		printk(KERN_DEBUG "sendudp %llu\n", ptr->bytes);
+// 		memset(&t, 0, sizeof(struct dq_t));
+// 		t.category = QUEUE;
+// 		t.queue.queue_id 	= ptr->queue_id;
+// 		t.queue.bytes 		= ptr->bytes;
+// 		t.queue.packets 	= ptr->packets;
+// 		t.queue.qlen 		= ptr->qlen;
+// 		t.queue.backlog 	= ptr->backlog;
+// 		t.queue.drops 		= ptr->drops;
+// 		t.queue.requeues 	= ptr->requeues;
+// 		t.queue.overlimits 	= ptr->overlimits;
+// 		t.queue.sec 		= ptr->sec;
+// 		t.queue.usec		= ptr->usec;
+// 		memcpy(&(t.mac), mac_global, 6);
+// 		write_2_public_buffer(&t, sizeof(struct dq_t));	
+// 		*queue_last = *ptr;		
 // 	}
 // }
+
 void compare_and_queue(void)
 {
 	int i = 0;
@@ -1169,6 +806,20 @@ void compare_and_queue(void)
 		write_2_public_buffer(&t, sizeof(struct dq_t));
 	}
 }
+// struct data_queue
+// {
+// 	__u32 queue_id;
+// 	__u32 packets;
+// 	__u64 bytes;
+// 	__be32 sec;
+// 	__be32 usec;
+// 	__u32 qlen;
+// 	__u32 backlog;
+// 	__u32 drops;
+// 	__u32 requeues;
+// 	__u32 overlimits;
+// 	__u32 pad;
+// };
 /**
  * Simillar as compare_and_iwlist
  * @Linger
@@ -1217,9 +868,8 @@ void get_information(void)
 	// struct 	data_queue 	*queue 	= NULL;
 	struct 	data_beacon *beacon = NULL;
 	struct data_survey survey_linger;
-	int drop_c = 0;
 
-	// memset(queue_last, 0, sizeof(struct data_queue));
+	memset(queue_last, 0, sizeof(struct data_queue));
 
 	control_beacon += 1;
 	control_beacon = control_beacon % 10000000;
@@ -1234,21 +884,8 @@ void get_information(void)
 	dp_que 		= dpt_queue_linger();
 	dp_mac 		= dpt_mac_linger();
 
-
 	if (iwlist)
 	{
-		struct apstates *tmp;
-		tmp = apstates_global + aps_head;
-		tmp->time = survey_linger.time;
-		tmp->time_busy = survey_linger.time_busy;
-		tmp->time_ext_busy = survey_linger.time_ext_busy;
-		tmp->time_rx = survey_linger.time_rx;
-		tmp->time_tx = survey_linger.time_tx;
-		tmp->time_scan = survey_linger.time_scan;
-		tmp->noise = survey_linger.noise;
-		tmp->sec = survey_linger.sec;
-		tmp->usec = survey_linger.usec;
-		// printk(KERN_DEBUG "%u  %u", tmp->sec, tmp->usec);
 		compare_and_iwlist(iwlist, &survey_linger);
 		destroy_iwlist(iwlist);
 	}
@@ -1270,13 +907,11 @@ void get_information(void)
 				write_2_public_buffer(&dp_m_w, sizeof(struct dp_t));
 				last_sec_drop_mac = dp_m_w.drops.sec;
 				last_usec_drop_mac = dp_m_w.drops.usec;
-				drop_c += 1; // used to calculate drop_count.
 			}
 			else if ((dp_m_w.drops.sec == last_sec_drop_mac) && (dp_m_w.drops.usec > last_usec_drop_mac))
 			{
 				write_2_public_buffer(&dp_m_w, sizeof(struct dp_t));
 				last_usec_drop_mac = dp_m_w.drops.usec;
-				drop_c += 1;
 			}
 			
 			ptr = ptr->next;
@@ -1289,6 +924,7 @@ void get_information(void)
 	{
 		compare_and_beacon(beacon);
 	}
+
 	// if (queue)
 	// {
 		// printk(KERN_DEBUG "before %llu\n", queue->bytes);
@@ -1312,29 +948,17 @@ void get_information(void)
 				write_2_public_buffer(&dp_q_w, sizeof(struct dp_t));
 				last_sec_drop_queue = dp_q_w.drops.sec;
 				last_usec_drop_queue = dp_q_w.drops.usec;
-				drop_c += 1;
 			}
 			else if ((dp_q_w.drops.sec == last_sec_drop_queue) && (dp_q_w.drops.usec > last_usec_drop_queue))
 			{
 				write_2_public_buffer(&dp_q_w, sizeof(struct dp_t));
 				last_usec_drop_queue = dp_q_w.drops.usec;
-				drop_c += 1; 
 			}
 			
 			ptr = ptr->next;
 		}
 		destroy_after_transmitted_codel();
 		// printk(KERN_DEBUG "destroy_after_transmitted_codel in sendudp\n");
-	}
-	apstates_global[aps_head].drop_count = drop_c;
-	aps_head  += 1;
-	aps_head = aps_head % APSL;
-	// printk(KERN_DEBUG "fuck %u %u\n", aps_head, aps_tail);
-	if (aps_head == aps_tail)
-	{
-		aps_tail += 1;
-		aps_tail = aps_tail % APSL;
-		// printk(KERN_DEBUG "xxoo %u %u\n", aps_head, aps_tail);
 	}
 }
 
@@ -1347,7 +971,7 @@ void destroy_data(void)
 {
 	struct data_iw *pre_iw = NULL;
 	struct data_iw *ptr_iw = NULL;
-	// struct data_queue *ptr_que = NULL;
+	struct data_queue *ptr_que = NULL;
 	struct data_beacon *pre_beacon = NULL;
 	struct data_beacon *ptr_beacon = NULL;
 
@@ -1360,12 +984,12 @@ void destroy_data(void)
 		pre_iw = NULL;
 	}
 
-	// ptr_que = queue_last;
-	// if (ptr_que)
-	// {
-	// 	kfree(ptr_que);
-	// 	ptr_que = NULL;
-	// }
+	ptr_que = queue_last;
+	if (ptr_que)
+	{
+		kfree(ptr_que);
+		ptr_que = NULL;
+	}
 	ptr_beacon = beacon_last;
 	while (ptr_beacon)
 	{
@@ -1399,14 +1023,9 @@ static int hello_init(void)
 {
 	struct net_device *dev;
 	char *ifname = "br0";
-	int i = 0;
-	// for(i = 0; i < 6; i++)
-	// {
-	// 	memset(&queue_last[i], 0, sizeof(struct data_queue));
-	// }
-	
+	queue_last 		= (struct data_queue *)kmalloc(sizeof(struct data_queue), GFP_KERNEL);
 
-	// printk(KERN_DEBUG "Hello, kernel %lu %lu %lu %lu", sizeof(struct data_iw), sizeof(struct data_iw *), sizeof(struct dp_packet), sizeof(struct data_beacon));
+	printk(KERN_DEBUG "Hello, kernel %d %d %d %d", sizeof(struct data_iw), sizeof(struct data_iw *), sizeof(struct dp_packet), sizeof(struct data_beacon));
 	sock_global = get_sock();
 
 	dev = __dev_get_by_name(sock_net(sock_global->sk), ifname);
@@ -1415,22 +1034,6 @@ static int hello_init(void)
 		memset(mac_global, 0, 6);
 		memcpy(mac_global, dev->dev_addr, 6);
 	}
-	for(i = 0; i < 10; i++)
-	{
-		memset(&iw_rec[i], 0, sizeof(struct iw_record));
-	}
-	memset(&maxrateflow, 0, sizeof(struct iw_record));
-    printk("init netlink_demo!\n");
-
-
-    netlinkfd = netlink_kernel_create(&init_net, USER_MSG, &cfg);
-    if(!netlinkfd)
-    {
-        printk(KERN_ERR "can not create a netlink socket!\n");
-        return -1;
-    }
-
-    printk("netlink demo init ok!\n");
 
 	write_begin = 0;
 	memset(&public_buffer, 0, B_S);
@@ -1455,8 +1058,6 @@ static void hello_exit(void)
 	}
 	del_timer(&tm);
 	destroy_data();
-    sock_release(netlinkfd->sk_socket);
-    printk(KERN_DEBUG "netlink exit\n!");
 	printk(KERN_ALERT "Goodbye,Cruel world\n");
 }
 
@@ -1474,18 +1075,5 @@ int strcmp_linger(char *s, char *t)
 	return (condition == 6) ? 0 : 1;
 }
 
-int strcmp_n(char *s, char *t, int n)
-{
-    int i = 0;
-    int condition = 0;
-    for (i = 0; i < n; i++)
-    {
-        int tmp = 1000;
-        tmp = (int) * (s + i) - (int) * (t + i);
-        if (tmp == 0)
-            condition += 1;
-    }
-    return (condition == n) ? 0 : 1;
-}
 module_init(hello_init);
 module_exit(hello_exit);

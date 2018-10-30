@@ -493,6 +493,7 @@ VLOG_INFO("4");
       if (max_flow.sec != 0)
       {
         char *ret1 = NULL;
+        int port1 = 12345;
 
         char ip_src[20];
         char ip_dst[20];
@@ -513,8 +514,47 @@ VLOG_INFO("4");
         ptr_uc = (unsigned char *) &max_flow.ip_dst;
         sprintf (ip_dst, "%u.%u.%u.%u", ptr_uc[3], ptr_uc[2], ptr_uc[1], ptr_uc[0]);
          VLOG_INFO("3210 %s, 0123 %s %d", ip_src, ip_src1, port);
+        if (sock < 0)
+        {
+          VLOG_INFO("11");
+          sock = socket(AF_INET,SOCK_DGRAM, 0);
+          VLOG_INFO("12");
+          if(sock < 0)
+          {
+            perror("socket");
+            destroy_everything();
+            return -1;
+          }
+          VLOG_INFO("13");
+          struct sockaddr_in server;
+          struct sockaddr_in local;
+          server.sin_family = AF_INET;
+          server.sin_port = htons(12345);
+          server.sin_addr.s_addr = inet_addr(ip_src);
+          socklen_t len = sizeof(struct sockaddr_in);
 
+          local.sin_family = AF_INET;
+          local.sin_port = htons(PORT_LINGER);
+          local.sin_addr.s_addr = htonl(INADDR_ANY);
 
+          socklen_t len1 = sizeof(local);
+          if(bind(sock,(struct sockaddr*)&local , len1) < 0)
+          {
+            perror("bind");
+            destroy_everything();
+            return -1;
+          }
+          // VLOG_INFO("14 %s\n", ip_src);
+          // if(connect(sock, (struct sockaddr*)&server, len) < 0 )
+          // {
+          //   // perror("connect");
+          //   VLOG_INFO("18");
+          //   destroy_everything();
+          //   return -1;
+          // }
+          // VLOG_INFO("15");
+        }
+        VLOG_INFO("16");
         if (sock > 0)
         {
           window = check_cwnd(sock, ip_src, ip_dst, max_flow.sourceaddr, max_flow.destination);
@@ -524,7 +564,9 @@ VLOG_INFO("4");
           free(ret1);
           ret1 = NULL;
         }
-        // else
+        VLOG_INFO("17");
+        close(sock);
+        sock = -1;
       }
       if(skfd > -1)
       {
@@ -1139,7 +1181,8 @@ int check_cwnd(int sock, char *ip_src, char *ip_dst, __be16 src_port, __be16 dst
   tmp->dst_port = dst_port;
   memcpy(buf, tmp, len_ss);
   write(sock, buf, len_ss);
-  sleep(1);
+  sendto(sock, buf, sizeof(buf), 0, (struct sockaddr *)&client, &len);
+  // sleep(1);
   get_systime_linger(&sec0, &usec0);
   _s = read(sock, buf, sizeof(buf) - 1);
   if (_s > 0)
