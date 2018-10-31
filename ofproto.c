@@ -35,6 +35,7 @@
 #include <endian.h>
 #include <netlink/msg.h>
 #include <netlink/attr.h>
+#include <fcntl.h>
 #include "bitmap.h"
 #include "bundles.h"
 #include "byte-order.h"
@@ -75,7 +76,6 @@
 #include "unaligned.h"
 #include "unixctl.h"
 #include "util.h"
-
 #include <sys/socket.h>
 #include <stdint.h>
 
@@ -88,21 +88,43 @@ COVERAGE_DEFINE(ofproto_recv_openflow);
 COVERAGE_DEFINE(ofproto_reinit_ports);
 COVERAGE_DEFINE(ofproto_update_port);
 
-
-
-
 #define NETLINK_USER 22
 #define USER_MSG    (NETLINK_USER + 1)
 #define MSG_LEN 150
 #define ITEM_AMOUNT 100
 #define MAX_PLOAD 150
+#define FLOWS_KEEP 10
+#define PORT_LINGER 12346
 
+// extern int cwnd;
+// extern int mss;
+struct tcp_ss
+{
+    __u32 state;
+    char ip_src[18];
+    char ip_dst[18];
+    __be16 src_port;
+    __be16 dst_port;
+    __u32 cwnd;
+};
+struct cwnd_mss
+{
+  int cwnd;
+  int mss;
+};
+
+struct flow_info
+{
+  __be16 port;
+  __u32 snd_cwnd;
+  __u32 srtt_us;
+  __u32 mdev_us;
+  __u32 timein;
+  __u32 mss_linger;
+};
 
 struct tcp_flow
 {
-  /**
-   * used to label a tcp flow.
-   */
   __be32 ip_src;
   __be32 ip_dst;
   __be16 sourceaddr;
@@ -110,6 +132,7 @@ struct tcp_flow
   __u16 winsize;
   __u32 sec;
   __u32 usec;
+  __u64 packets;
 };
 
 struct apstates
@@ -134,27 +157,7 @@ struct apstates
     __u32 overlimits;
     __u16 pad;   
 };
-// /**
-//  * apstates_float is used to represent the real value of
-//  * ap states. Beacause float is not supported in kernel.
-//  */
-// struct apstates_float
-// {
-//  float drop_count;
-//  float time_busy;
-//  float time_ext_busy;
-//  float time_rx;
-//  float time_tx;
-//  float time_scan;
-//  float noise;
-//  float packets;
-//  float bytes;
-//  float qlen;
-//  float backlog;
-//  float drops;
-//  float requeues;
-//  float overlimits;
-// };
+
 enum sta_l
 {
   drop_count, time_busy, time_ext_busy, time_rx, time_tx, time_scan, noise, packets, bytes, qlen, backlog, drops, requeues, overlimits
@@ -177,7 +180,18 @@ struct rawdata
   int class;
   struct rawdata * next;
 };
-
+/**
+ * Used to get the max rate link, calculate link status
+ */
+struct iw_record
+{
+  char station[6];
+  __u32 sec;
+  __u32 usec;
+  __u64 bytes;
+  __u32 rates;
+  __u16 computed;
+};
 struct treenode
 {
   /**
@@ -199,78 +213,1054 @@ struct item_value
   char *name;
   float value;
 };
-
-typedef enum windowsize
-{
-  /**
-   * used to set cwnd.
-   */
-  keep,
-  half,
-  quater,
-  one
-} windsz;
-void free_rawdata(struct rawdata *);
-void print_rawdata(struct rawdata*);
-struct treenode * create_tree(struct rawdata *, struct treenode *);
-void destroy_tree(struct treenode *);
-void print_tree(struct treenode *);
-struct rawdata * find_rchild(struct rawdata *, int );
-struct rawdata * find_lchild(struct rawdata *, int );
-char ** get_parameters(struct rawdata *);
-int TreeDepth(struct treenode *);
-void destroy_parameters(char **);
-struct treenode* bst_search(struct treenode*, struct item_value value[], int length);
+void mac_tranADDR_toString_r(unsigned char* addr, char* str, size_t size);
+void reversebytes_uint32t(__u32 *value);
+void reversebytes_uint64t(__u64 *value);
+void set_cwnd(struct tcp_flow* tflow, char *ret, int size, int window);
+char* get_openflow_input(void);
+int main_linger(void);
+void assign_string(struct item_value* d, char *s);
+void destroy_everything(void);
+int init_linger_m(char * inputtxt);
+int init_linger(char * inputtxt, char * item);
+void free_rawdata(struct rawdata * head);
+void print_rawdata(struct rawdata* raw);
+struct treenode * create_tree(struct rawdata *ptr);
+void print_tree(struct treenode *raw);
+void destroy_tree(struct treenode *T);
+struct rawdata * find_lchild(struct rawdata *ptr, int father);
+struct rawdata * find_rchild(struct rawdata *ptr, int father);
+int TreeDepth(struct treenode *T);
+struct treenode* bst_search(struct treenode* node, struct item_value value[], int length);
+// char ** get_parameters(struct rawdata *ptr);
+// void destroy_parameters(char *ptr[80]);
 int create_items(struct item_value items_list[], char *buffer);
 void destroy_item_list(struct item_value items_list[]);
-int init_linger(char *, char *);
-void destroy_everything();
-
-void reversebytes_uint32t(__u32 *value);
+static void get_systime_linger(__be32 *t, __be32 *v);
+int ppp(int port_linger, char *ip_linger);
+int check_cwnd(int sock, char *ip_src, char *ip_dst, __be16 src_port, __be16 dst_port);
 void reversebytes_uint16t(__u16 *value);
-void reversebytes_uint64t(__u64 *value);
-void set_cwnd(int cwnd, struct tcp_flow* tflow, char *ret, int size);
-void assign_string(struct item_value* d, char *s);
-static int main_linger(void);
+void handle_msg(const struct ofpbuf *msg);
+void reversebytes_be16t(__be16 *value);
+// void handle_msg(void);
+
 struct treenode *tnode = NULL;
 struct item_value items_list[ITEM_AMOUNT];
-char **parameters;
-struct rawdata *node = NULL;
-
-// #define BUF_SIZE 1024
-// #define ITEM_AMOUNT 40
-// char buf[BUF_SIZE];
-// struct data_queue {
-//   __u32 queue_id;
-//   __u64 bytes;
-//   __u32 packets;
-//   __u32 qlen;
-//   __u32 backlog;
-//   __u32 drops;
-//   __u32 requeues;
-//   __u32 overlimits;
-//   struct data_queue *next;
-// };
-// struct data_queue * get_queue();
-// void print_queue(struct data_queue *data);
-// int get_value(char *str, char * strb, char * stre);
-// void print_iw(struct data_iw *ptr);
-// void print_survey(struct data_survey *ptr);
-// int delete_nodes(struct iwinfo * ptr);
-// int get_iw();
-// struct treenode *tnode = NULL;
-// struct item_value items_list[ITEM_AMOUNT];
 // char **parameters;
-// struct rawdata *node = NULL;
+struct rawdata *node = NULL;
+int skfd = -1;
+int sock = -1;
+/**
+ * 0010 0100 -> 0100 0010
+ * @param value 0010 0100
+ */
 
-// struct flow_linger
+
+void mac_tranADDR_toString_r(unsigned char* addr, char* str, size_t size)
+{
+  if (addr == NULL || str == NULL || size < 18)
+  {
+
+  }
+  else
+  {
+	  snprintf(str, size, "%02x:%02x:%02x:%02x:%02x:%02x",
+	           addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+	  str[17] = '\0';
+  }
+}
+void reversebytes_uint32t(__u32 *value)
+{
+  *value = (*value & 0x000000FFU) << 24 | (*value & 0x0000FF00U) << 8 |
+           (*value & 0x00FF0000U) >> 8 | (*value & 0xFF000000U) >> 24;
+}
+void reversebytes_uint16t(__u16 *value)
+{
+  *value = (*value & 0x00FF) << 8 | (*value & 0xFF00) >> 8;
+}
+void reversebytes_be16t(__be16 *value)
+{
+  *value = (*value & 0x00FF) << 8 | (*value & 0xFF00) >> 8;
+}
+void reversebytes_uint64t(__u64 *value)
+{
+  __u64 low = (*value & 0x00000000FFFFFFFF);
+  __u64 high = (*value & 0xFFFFFFFF00000000) >> 32;
+  __u32 low_32 = (__u32) low;
+  __u32 high_32 = (__u32) high;
+  reversebytes_uint32t(&low_32);
+  reversebytes_uint32t(&high_32);
+  low = ((__u64) low_32) << 32;
+  high = ((__u64) high_32);
+  *value = low | high;
+}
+/**
+ * [set_cwnd get a flow structure tflow, and return ofctl command.]
+ * @param  cwnd  cwnd value to set
+ * @param  tflow flow structure
+ */
+void set_cwnd(struct tcp_flow* tflow, char *ret, int size, int window)
+{
+  char ip_src[20];
+  char ip_dst[20];
+  char buff[200];
+  unsigned char *ptr_uc;
+        reversebytes_uint32t(&(tflow->ip_src));
+        reversebytes_uint32t(&(tflow->ip_dst));
+  ptr_uc = (unsigned char *) & (tflow->ip_src);
+
+  sprintf(ip_src, "%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
+  ptr_uc = (unsigned char *) & (tflow->ip_dst);
+  sprintf(ip_dst, "%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
+  reversebytes_uint16t(&(tflow->winsize));
+  // reversebytes_uint16t(&(tflow->sourceaddr));
+  // reversebytes_uint16t(&(tflow->destination));
+
+  memset(buff, 0, 200);
+  sprintf(buff, "ovs-ofctl add-flow br0 -O openflow13 tcp,nw_src=%s,nw_dst=%s,tcp_src=%d,tcp_dst=%d,actions=mod_tp_dst:%d",
+          ip_src, ip_dst, tflow->sourceaddr, tflow->destination, window);
+  strncpy(ret, buff, size);
+}
+
+char* get_openflow_input(void)
+{
+  char *str = NULL;
+  char inputtxt[] = "0,0,requeues_3,5158.975,0|0,1,busy_time_1,808.831,2|1,2,leaf,0,2|1,3,allpackets_1,150.5,2|3,4,leaf,0,2|3,5,requeues_1,678.932,2|5,6,drops_1,3211.45,2|6,7,leaf,0,2|6,8,leaf,0,2|5,9,leaf,0,2|0,10,busy_time_1,808.542,0|10,11,retrans_4,14.5,0|11,12,allpackets_3,182.5,0|12,13,retrans_5,14.5,0|13,14,retrans_3,0.5,0|14,15,receive_time_1,122.551,0|15,16,leaf,0,0|15,17,leaf,0,1|14,18,transmit_time_4,32.177,0|18,19,leaf,0,0|18,20,leaf,0,0|13,21,leaf,0,0|12,22,allpackets_1,202.5,0|22,23,rbytes_3,257018.672,0|23,24,leaf,0,0|23,25,allpackets_1,170.5,0|25,26,leaf,0,0|25,27,leaf,0,0|22,28,leaf,0,0|11,29,leaf,0,0|10,30,leaf,0,2";
+  int len = 0;
+  len = strlen(inputtxt) + 1;
+
+  str = (char *)malloc(sizeof(char) * len);
+  memset(str, 0, len);
+  strcpy(str, inputtxt);
+
+  return str;
+}
+// static void setnonblocking(int sockfd) {
+//     int flag = fcntl(sockfd, F_GETFL, 0);
+//     if (flag < 0) {
+//         VLOG_INFO("error");
+//         return;
+//     }
+//     if (fcntl(sockfd, F_SETFL, flag | O_NONBLOCK) < 0) {
+//         VLOG_INFO("error");
+//     }
+// }
+
+int main_linger(void)
+{
+  char *data = "flows";
+  char *data1 = "states";
+  // char *data2 = "maxras";
+  // char *data3 = "flooss";
+  struct sockaddr_nl  local, dest_addr;
+
+  struct nlmsghdr *nlh = NULL;
+  struct _my_msg info;
+  int ret;
+  // struct tcp_flow control;
+  struct apstates apst;
+  char ret_none[10];
+
+
+
+
+  struct treenode* search_results = NULL;
+
+  if(skfd < 0)
+  {
+    skfd = socket(AF_NETLINK, SOCK_RAW, USER_MSG);
+    if (skfd == -1)
+    {
+      VLOG_INFO("create socket error...%s\n", strerror(errno));
+      destroy_everything();
+      return -1;
+    }
+    memset(&local, 0, sizeof(local));
+    local.nl_family = AF_NETLINK;
+    local.nl_pid = 50;
+    local.nl_groups = 0;
+    if (bind(skfd, (struct sockaddr *)&local, sizeof(local)) != 0)
+    {
+      VLOG_INFO("bind() error\n");
+      // close(skfd);
+      destroy_everything();
+      return -1;
+    }
+  }
+
+  if(skfd < 0)
+    return -1;
+  memset(&dest_addr, 0, sizeof(dest_addr));
+  dest_addr.nl_family = AF_NETLINK;
+  dest_addr.nl_pid = 0; // to kernel
+  dest_addr.nl_groups = 0;
+  nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MAX_PLOAD));
+  memset(nlh, 0, sizeof(struct nlmsghdr));
+  nlh->nlmsg_len = NLMSG_SPACE(MAX_PLOAD);
+  nlh->nlmsg_flags = 0;
+  nlh->nlmsg_type = 0;
+  nlh->nlmsg_seq = 0;
+  nlh->nlmsg_pid = local.nl_pid; //self port
+
+  memcpy(NLMSG_DATA(nlh), data1, strlen(data1));
+  ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
+  if (!ret)
+  {
+    perror("sendto error1\n");
+    // close(skfd);
+   	return -1;
+  }
+  memset(&info, 0, sizeof(info));
+  ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, (socklen_t*)sizeof(dest_addr));
+  memset(ret_none, 0, 10);
+  memcpy(ret_none, info.data, 8);
+  if (!strcmp(ret_none, "nonedata"))
+  {
+    VLOG_INFO("nonedata %s\n", ret_none);
+  }
+  else
+  {
+    float times = 0.000001;
+    struct item_value fstates[14];
+    int i = 0;
+    // char len[14][20] = {"drop_count", "time_busy", "time_ext_busy", "time_rx", "time_tx", "time_scan", "noise", "packets", "bytes", "qlen", "backlog", "drops", "requeues", "overlimits"};
+    // memset(&fstates, 0, sizeof(struct apstates_float));
+    memset(&apst, 0, sizeof(struct apstates));
+    memcpy(&apst, info.data, sizeof(struct apstates));
+
+    // reversebytes_uint32t(&(apst.sec));
+    // reversebytes_uint32t(&(apst.usec));
+    // reversebytes_uint64t(&(apst.time_busy));
+    // reversebytes_uint64t(&(apst.time_ext_busy));
+    // VLOG_INFO("W %u %u %u %llu %llu %llu %d\n", apst.sec, apst.usec, apst.drop_count, apst.time, apst.time_busy, apst.time_ext_busy, sizeof(struct apstates));
+    fstates[drop_count].value = ((float)apst.drop_count) * times;
+    assign_string(&fstates[drop_count], "drop_count");
+    fstates[time_busy].value = ((float)apst.time_busy) * times;
+    assign_string(&fstates[time_busy] , "time_busy");
+    fstates[time_ext_busy].value = ((float)apst.time_ext_busy) * times;
+    assign_string(&fstates[time_ext_busy] , "time_ext_busy");
+    fstates[time_rx].value = ((float)apst.time_rx) * times;
+    assign_string(&fstates[time_rx] , "time_rx");
+    fstates[time_tx].value = ((float)apst.time_tx) * times;
+    assign_string(&fstates[time_tx], "time_tx");
+    fstates[time_scan].value = ((float)apst.time_scan) * times;
+    assign_string(&fstates[time_scan] , "time_scan");
+    fstates[noise].value = (float)apst.noise;
+    assign_string(&fstates[noise] , "noise");
+    fstates[packets].value = ((float)apst.packets) * times;
+    assign_string(&fstates[packets] , "packets");
+    fstates[bytes].value = ((float)apst.bytes * times);
+    assign_string(&fstates[bytes] , "bytes");
+    fstates[qlen].value = ((float)apst.qlen);
+    assign_string(&fstates[qlen] , "qlen");
+    fstates[backlog].value = ((float)apst.backlog);
+    assign_string(&fstates[backlog] , "backlog");
+    fstates[drops].value = ((float)apst.drops);
+    assign_string(&fstates[drops] , "drops");
+    fstates[requeues].value = ((float)requeues * times);
+    assign_string(&fstates[requeues] , "requeues");
+    fstates[overlimits].value = ((float)overlimits * times);
+    assign_string(&fstates[overlimits] , "overlimits");
+
+    // for (i = 0; i < 14; i++)
+    // {
+    //   VLOG_INFO("%s: %f\t", fstates[i].name, fstates[i].value);
+    //   if(!(i % 4))
+    //     VLOG_INFO("\n");
+    // }
+
+    search_results = bst_search(tnode, fstates, 14);
+
+    // search_results = 1;
+    if (search_results)
+    {
+      struct tcp_flow max_flow;
+      memset(&max_flow, 0, sizeof(struct tcp_flow));
+      memcpy(NLMSG_DATA(nlh), data, strlen(data));
+      ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
+
+      if (!ret)
+      {
+        perror("sendto error1\n");
+        destroy_everything();
+        return -1;
+      }
+      for (i = 0; i < FLOWS_KEEP; i++)
+      {
+        
+        struct tcp_flow tmp;
+        memset(&tmp, 0, sizeof(struct tcp_flow));
+
+        ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, (socklen_t*)sizeof(dest_addr));
+
+        memcpy(&tmp, info.data, sizeof(struct tcp_flow));
+        
+        if(tmp.packets > max_flow.packets)
+          max_flow = tmp;
+      }
+
+      if (max_flow.sec != 0)
+      {
+        // char *ret1 = NULL;
+
+        char ip_src[20];
+        char ip_dst[20];
+        char ip_src1[20];
+        reversebytes_be16t(&(max_flow.sourceaddr));
+        reversebytes_be16t(&(max_flow.destination));
+        // int port = max_flow.sourceaddr;
+
+        unsigned char *ptr_uc = NULL;
+        memset(ip_src, 0, 20);
+        memset(ip_dst, 0, 20);
+        memset(ip_src1, 0, 20);
+        reversebytes_uint32t(&(max_flow.ip_src));
+        reversebytes_uint32t(&(max_flow.ip_dst));
+        ptr_uc = (unsigned char *) &max_flow.ip_src;
+        sprintf (ip_src, "%u.%u.%u.%u", ptr_uc[3], ptr_uc[2], ptr_uc[1], ptr_uc[0]);
+        sprintf (ip_src1, "%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
+        ptr_uc = (unsigned char *) &max_flow.ip_dst;
+        sprintf (ip_dst, "%u.%u.%u.%u", ptr_uc[3], ptr_uc[2], ptr_uc[1], ptr_uc[0]);
+        VLOG_INFO("%d %d", cwnd, mss);
+         // VLOG_INFO("3210 %s, 0123 %s %d", ip_src, ip_src1, port);
+        // if (1)
+        // {
+        //   struct sockaddr_in si_other;
+        //   struct sockaddr_in si_me;
+        //   int slen=sizeof(si_other);
+        //   char buf[1024];
+        //   int window = 0;
+        //   struct tcp_ss *tmp = NULL;
+        //   char buf1[8];
+        //   int len_ss;
+        //   ssize_t _s = 0;
+        //   int leng_int = sizeof(struct cwnd_mss);
+
+
+        //   if(sock < 0)
+        //   {
+        //     if ( (sock=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+        //     {
+        //         destroy_everything();
+        //         return -1;
+        //     }
+        //   struct timeval timeout;
+        //   timeout.tv_sec = 0;
+        //   timeout.tv_usec = 10000;
+        //   if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
+        //       VLOG_INFO("setsockopt failed:");
+        //   }
+        //   }
+        //   memset((char *) &si_me, 0, sizeof(si_me));
+           
+        //   si_me.sin_family = AF_INET;
+        //   si_me.sin_port = htons(12346);
+        //   si_me.sin_addr.s_addr = inet_addr("192.168.11.101");
+           
+        //   //bind socket to port
+        //   if( bind(sock , (struct sockaddr*)&si_me, sizeof(si_me) ) == -1)
+        //   {
+        //       destroy_everything();
+        //       return -1;
+        //   }
+     
+        //   memset((char *) &si_other, 0, sizeof(si_other));
+        //   si_other.sin_family = AF_INET;
+        //   si_other.sin_addr.s_addr = INADDR_ANY;
+        //   si_other.sin_port = htons(12345);
+        //   // VLOG_INFO("%s %s\n", ip_src, ip_dst);
+        //   if (inet_aton(ip_src , &si_other.sin_addr) == 0) 
+        //   {
+        //     destroy_everything();
+        //     return -1;
+        //   }
+
+        //   len_ss = sizeof(struct tcp_ss) * sizeof(char);
+        //   tmp = (struct tcp_ss *)malloc(len_ss);
+        //   memset(tmp, 0, len_ss);
+
+        //   strcpy(tmp->ip_src, ip_src);
+        //   strcpy(tmp->ip_dst, ip_dst);
+        //   tmp->src_port = max_flow.sourceaddr;
+        //   tmp->dst_port = max_flow.destination;
+        //   memcpy(buf, tmp, len_ss);
+        //   // VLOG_INFO("4 %s %s %d %d\n", tmp->ip_src, tmp->ip_dst, tmp->src_port, tmp->dst_port);
+        //   if (sendto(sock, buf, len_ss , 0 , (struct sockaddr *) &si_other, slen)==-1)
+        //   {
+        //       destroy_everything();
+        //       return -1;
+        //   }
+        //   free(tmp);
+        //   tmp = NULL;
+        //   _s = -1;
+        //   static fd_set fds;
+        //   FD_ZERO(&fds);
+        //   FD_SET(sock, &fds);
+        //   static struct timeval tv = {0, 10000};
+        //   int readynum = select(sock + 1, &fds, NULL, NULL, &tv);
+        //   if(readynum > 0)
+        //   {
+        //     memset(buf1, 0, 8);
+        //     _s = recvfrom(sock, buf1, 8, 0, (struct sockaddr *) &si_other, (socklen_t*)&slen);
+        //     VLOG_INFO("_s is %d", (int)_s);
+        //     if (_s > 0)
+        //     {
+        //       struct cwnd_mss tmp;
+        //       VLOG_INFO("%s", buf1);
+        //       memset(&tmp, 0, leng_int);
+        //       memcpy(&tmp, buf1, leng_int);
+        //       VLOG_INFO("%d %d", tmp.cwnd, tmp.mss);
+        //       window = tmp.cwnd * tmp.mss;
+        //     }
+        //     else
+        //     {
+        //       VLOG_INFO("fucking %d", (int)errno);
+        //     }
+        //   }
+        //   ret1 = malloc(sizeof(char) * 200);
+        //   set_cwnd(&max_flow, ret1, 200, window);
+        //   VLOG_INFO("ssss %s %d\n", ret1, window);
+        //   free(ret1);
+        //   ret1 = NULL;
+        
+        //   close(sock);
+        //   sock = -1;
+        // }
+      }
+      if(skfd > -1)
+      {
+        close(skfd);
+        skfd = -1;
+      }
+      // memcpy(NLMSG_DATA(nlh), data2, strlen(data2));
+      // ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
+      // if (!ret)
+      // {
+      //   perror("sendto error1\n");
+      //   close(skfd);
+      //   destroy_everything();
+      //   return -1;
+      // }
+      // memset(&info, 0, sizeof(info));
+      // ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, (socklen_t*)sizeof(dest_addr));
+      // memset(&iw_rec, 0, sizeof(struct iw_record));
+      // memcpy(&iw_rec, info.data, sizeof(struct iw_record));
+      // mac_tranADDR_toString_r((unsigned char*)iw_rec.station, mac_addr, 18);
+
+
+      // memcpy(NLMSG_DATA(nlh), data3, strlen(data3));
+      // ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
+      // if (!ret)
+      // {
+      //   perror("sendto error1\n");
+      //   close(skfd);
+      //   destroy_everything();
+      //   return -1;
+      // }
+
+      // memset(&info, 0, sizeof(info));
+      // ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, (socklen_t*)sizeof(dest_addr));
+      // for(i = 0; i < 5; i++)
+      // {
+      //   memset(&flowin, 0, sizeof(struct flow_info));
+      //   memcpy(&flowin, info.data, sizeof(struct flow_info));
+      //   reversebytes_uint16t (&flowin.port);
+      //   VLOG_INFO("flow info: %d %u %u %u %u %u\n", flowin.port, flowin.snd_cwnd, flowin.srtt_us, flowin.mdev_us, flowin.timein, flowin.mss_linger);
+      // }
+    }
+    else
+      VLOG_INFO("not found111\n");
+    destroy_item_list(fstates);
+  }
+  if (!ret)
+  {
+    perror("recv form kernel error\n");
+    // close(skfd);
+    destroy_everything();
+    return -1;
+  }
+  // VLOG_INFO("6");
+  if (search_results)
+  {
+    // VLOG_INFO("found\n");
+  }
+  else
+    VLOG_INFO("not found\n");
+  // close(skfd);
+  free((void *)nlh);
+  destroy_everything();
+  return 0;
+
+}
+
+void assign_string(struct item_value* d, char *s)
+{
+  int len = strlen(s);
+  d->name = (char *)malloc(sizeof(char) * len);
+  memset(d->name, 0, len);
+  memcpy(d->name, s, len);
+  d->name[len] = '\0';
+}
+
+/**
+ * clear structures
+ */
+void destroy_everything(void)
+{
+  destroy_item_list(items_list);
+  // destroy_parameters(parameters);
+  destroy_tree(tnode);
+  free_rawdata(node);
+  // if(skfd)
+  //   close(skfd);
+  if(node)
+    node = NULL;
+  if(tnode)
+    tnode = NULL;
+  // if(parameters)
+  //   parameters = NULL;
+  // if(items_list)
+  //  items_list = NULL;
+}
+int init_linger_m(char * inputtxt)
+{
+  char *str = NULL;
+
+  const char * split = "|";
+  char * p;
+  struct rawdata *nodeptr = NULL;
+
+  char *outer_ptr = NULL;
+  char *inner_ptr = NULL;
+
+
+  str = inputtxt;
+  p = strtok_r(str, split, &outer_ptr);
+  // VLOG_INFO("%s\n", inputtxt);
+  while (p != NULL)
+  {
+    char * tmp = NULL;
+    char * q;
+    struct rawdata *newnode = NULL;
+    int k = 0;
+    const char *split1 = ",";
+    tmp = p;
+    q = strtok_r(tmp, split1, &inner_ptr);
+    k = 0;
+    newnode = (struct rawdata *)malloc(sizeof(struct rawdata));
+    memset(newnode, 0, sizeof(struct rawdata));
+    while (q != NULL)
+    {
+      if (k == 0)
+        newnode->father = atoi(q);
+      if (k == 1)
+      {
+        newnode->itself = atoi(q);
+      }
+      if (k == 2)
+      {
+        int len = strlen(q);
+        newnode->name = (char *)malloc(sizeof(char) * len);
+        memset(newnode->name, 0, sizeof(char) * len);
+        strcpy(newnode->name , q);
+      }
+      if (k == 3)
+        newnode->value = atof(q);
+      if (k == 4)
+        newnode->class = atoi(q);
+      k = k + 1;
+      q = strtok_r(NULL, split1, &inner_ptr);
+    }
+    if (node == NULL)
+    {
+      node = newnode;
+      node->next = NULL;
+      nodeptr = node;
+    }
+    else
+    {
+      nodeptr->next = newnode;
+      nodeptr = newnode;
+      nodeptr->next = NULL;
+    }
+    p = strtok_r(NULL, split, &outer_ptr);
+  }
+  // print_rawdata(node);
+
+  tnode = create_tree(node);
+  // print_tree(tnode);
+  // VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
+  // parameters = get_parameters(node);
+  // while (parameters[i])
+  // {
+  //   VLOG_INFO("%d: %s\t", i, parameters[i]);
+  //   i = i + 1;
+  // }
+
+  return 0;
+}
+int init_linger(char * inputtxt, char * item)
+{
+  char *str = NULL;
+
+  const char * split = "|";
+  char * p;
+  struct rawdata *nodeptr = NULL;
+
+  char *outer_ptr = NULL;
+  char *inner_ptr = NULL;
+
+  // struct item_value *value[80];
+
+  int i = 0;
+  str = inputtxt;
+  p = strtok_r(str, split, &outer_ptr);
+  while (p != NULL)
+  {
+    char * tmp = NULL;
+    char * q;
+    struct rawdata *newnode = NULL;
+    int k = 0;
+    const char *split1 = ",";
+    tmp = p;
+    q = strtok_r(tmp, split1, &inner_ptr);
+    k = 0;
+    newnode = (struct rawdata *)malloc(sizeof(struct rawdata));
+    memset(newnode, 0, sizeof(struct rawdata));
+    while (q != NULL)
+    {
+      if (k == 0)
+        newnode->father = atoi(q);
+      if (k == 1)
+      {
+        newnode->itself = atoi(q);
+      }
+      if (k == 2)
+      {
+        int len = strlen(q);
+        newnode->name = (char *)malloc(sizeof(char) * len);
+        memset(newnode->name, 0, sizeof(char) * len);
+        strcpy(newnode->name , q);
+      }
+      if (k == 3)
+        newnode->value = atof(q);
+      if (k == 4)
+        newnode->class = atoi(q);
+      k = k + 1;
+      q = strtok_r(NULL, split1, &inner_ptr);
+    }
+    if (node == NULL)
+    {
+      node = newnode;
+      node->next = NULL;
+      nodeptr = node;
+    }
+    else
+    {
+      nodeptr->next = newnode;
+      nodeptr = newnode;
+      nodeptr->next = NULL;
+    }
+    p = strtok_r(NULL, split, &outer_ptr);
+  }
+  tnode = create_tree(node);
+  // print_tree(tnode);
+  // VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
+  // parameters = get_parameters(node);
+  // while (parameters[i])
+  // {
+  //   VLOG_INFO("%d: %s\t", i, parameters[i]);
+  //   i = i + 1;
+  // }
+  for (i = 0; i < ITEM_AMOUNT; i++)
+  {
+    // memset(items_list[i], 0, sizeof(struct item_value));
+    items_list[i].name = NULL;
+    items_list[i].value = -1000000.0;
+  }
+  create_items(items_list, item);
+  // for (i = 0; i < ITEM_AMOUNT; i++)
+  // {
+  //   if (items_list[i].name == NULL)
+  //     break;
+  //   VLOG_INFO("name %s value %f\n", items_list[i].name, items_list[i].value);
+  //   // i = i + 1;
+  // }
+
+  return 0;
+}
+
+void free_rawdata(struct rawdata * head)
+{
+  struct rawdata * before = NULL;
+  while (head)
+  {
+    before = head;
+    head = head->next;
+    free(before->name);
+    before->name = NULL;
+    free(before);
+    before = NULL;
+  }
+}
+
+void print_rawdata(struct rawdata* raw)
+{
+  while (raw != NULL)
+  {
+    VLOG_INFO("%d\t%d\t%s\t%f\t%d\n", raw->father, raw->itself, raw->name, raw->value, raw->class);
+    raw = raw->next;
+  }
+}
+
+struct treenode * create_tree(struct rawdata *ptr)
+{
+  struct treenode * newnode = NULL;
+  if (ptr != NULL)
+  {
+    newnode = (struct treenode *)malloc(sizeof(struct treenode));
+    memset(newnode, 0, sizeof(struct treenode));
+    newnode->name = (char *)malloc(sizeof(char) * strlen(ptr->name));
+    newnode->itself = ptr->itself;
+    strcpy(newnode->name, ptr->name);
+    newnode->value = ptr->value;
+    newnode->class = ptr->class;
+    newnode->lchild = NULL;
+    newnode->rchild = NULL;
+    newnode->parent = NULL;
+    if (strcmp(ptr->name, "leaf") != 0)
+    {
+      struct rawdata *ptrtmp = NULL;
+      ptrtmp = find_lchild(ptr->next, ptr->itself);
+      newnode->lchild = create_tree(ptrtmp);
+      ptrtmp = find_rchild(ptr->next, ptr->itself);
+      newnode->rchild = create_tree(ptrtmp);
+    }
+  }
+  return newnode;
+}
+
+void print_tree(struct treenode *raw)
+{
+  if (raw)
+  {
+    VLOG_INFO("%d\t%s\t%f\t%d\n", raw->itself, raw->name, raw->value, raw->class);
+    print_tree(raw->lchild);
+    print_tree(raw->rchild);
+  }
+}
+void destroy_tree(struct treenode *T)
+{
+  if (T)
+  {
+    destroy_tree(T->lchild);
+    destroy_tree(T->rchild);
+    free(T->name);
+    T->name = NULL;
+    free(T);
+    T = NULL;
+  }
+}
+struct rawdata * find_lchild(struct rawdata *ptr, int father)
+{
+  while (ptr)
+  {
+    if (ptr->father == father)
+    {
+      return ptr;
+    }
+    ptr = ptr->next;
+  }
+  return NULL;
+}
+struct rawdata * find_rchild(struct rawdata *ptr, int father)
+{
+  int rchild = 0;
+  while (ptr)
+  {
+    if (ptr->father == father)
+    {
+      if (rchild == 1)
+        return ptr;
+      rchild = rchild + 1;
+    }
+    ptr = ptr->next;
+  }
+  return NULL;
+}
+
+int TreeDepth(struct treenode *T)
+{
+  int rightdep = 0;
+  int leftdep = 0;
+
+  if (T == NULL)
+    return -1;
+
+  if (T->lchild != NULL)
+    leftdep = TreeDepth(T->lchild);
+  else
+    leftdep = -1;
+
+  if (T->rchild != NULL)
+    rightdep = TreeDepth(T->rchild);
+  else
+    rightdep = -1;
+
+  return (rightdep > leftdep) ? rightdep + 1 : leftdep + 1;
+}
+
+struct treenode* bst_search(struct treenode* node, struct item_value value[], int length)
+{
+  int found = 0;
+  struct treenode* node_pre = NULL;
+  node_pre = node;
+  while (node && (strcmp(node->name, "leaf") != 0))
+  {
+    int i = 0;
+    found = 0;
+    for (i = 0; i < length; i++)
+    {
+      if (strcmp(node->name, value[i].name) == 0)
+      {
+        found = 1;
+        break;
+      }
+      if (value[i].name == NULL)
+        break;
+    }
+    if (found == 0)
+      return NULL;
+    if (value[i].value <= node->value)
+    {
+      node_pre = node;
+      node = node->lchild;
+    }
+    else
+    {
+      node_pre = node;
+      node = node->rchild;
+    }
+  }
+  if (found)
+  {
+    VLOG_INFO("1 name %s value %f\n", node_pre->name, node_pre->value);
+    return node;
+  }
+  else
+  {
+    VLOG_INFO("2 name %s value %f\n", node_pre->name, node_pre->value);
+    return node_pre;
+  }
+}
+
+// char ** get_parameters(struct rawdata *ptr)
 // {
-//   char ip_src[20];
-//   char ip_dst[20];
-//   int  port_src;
-//   int  port_dst;
-//   int winsize;
-// };
+//   char **tmp;
+//   int i = 0, found = 0, last = 0;
+//   tmp = (char **)malloc(80 * sizeof(char *));
+//   for (i = 0; i < 80; i++)
+//   {
+//     tmp[i] = NULL;
+//   }
+//   while (ptr)
+//   {
+//     // char *str = NULL;
+//     if (strcmp(ptr->name, "leaf") == 0)
+//     {
+//       ptr = ptr->next;
+//       continue;
+//     }
+//     i = 0;
+//     found = 0;
+//     while (i < last)
+//     {
+//       if (strcmp(tmp[i], ptr->name) == 0)
+//       {
+//         found = 1;
+//         break;
+//       }
+//       i = i + 1;
+//     }
+//     if (found == 1)
+//     {
+//       ptr = ptr->next;
+//       continue;
+//     }
+//     else
+//     {
+//       tmp[last] = (char *)malloc(sizeof(char) * strlen(ptr->name));
+//       memset(tmp[last], 0, sizeof(char) * strlen(ptr->name));
+//       strcpy(tmp[last], ptr->name);
+//       last = last + 1;
+//     }
+
+//     ptr = ptr->next;
+//   }
+//   return tmp;
+// }
+// void destroy_parameters(char *ptr[80])
+// {
+//   int i = 0;
+//   for (i = 0; i < 80; i++)
+//   {
+//     free(ptr[i]);
+//   }
+//   free(ptr);
+// }
+
+int create_items(struct item_value items_list[], char *buffer)
+{
+  int j, in = 0;
+  char *p[40];
+  int index = 0;
+  char *buf = buffer;
+  char *outer_ptr = NULL;
+  char *inner_ptr = NULL;
+  while ((p[in] = strtok_r(buf, ";", &outer_ptr)) != NULL)
+  {
+    buf = p[in];
+    while ((p[in] = strtok_r(buf, ",", &inner_ptr)) != NULL)
+    {
+      in++;
+      buf = NULL;
+    }
+    buf = NULL;
+  }
+
+  for (j = 0; j < in; j++)
+  {
+    if (j % 2 ==  0)
+    {
+
+      items_list[index].name = (char *)malloc(sizeof(char) * strlen(p[j]));
+      memset(items_list[index].name, 0, sizeof(char) * strlen(p[j]));
+      strcpy(items_list[index].name, p[j]);
+    }
+    else
+    {
+
+      items_list[index].value = atof(p[j]);
+      if (index >= ITEM_AMOUNT)
+      {
+        VLOG_INFO("outrage\n");
+        destroy_everything();
+        return -1;
+      }
+
+      index = index + 1;
+    }
+  }
+  return 0;
+}
+
+void destroy_item_list(struct item_value items_list[])
+{
+  int i = 0;
+  while (items_list[i].name)
+  {
+    free(items_list[i].name);
+    items_list[i].name = NULL;
+  }
+}
+
+
+
+static void get_systime_linger(__be32 *t, __be32 *v)
+{
+  struct timeval tv;
+  memset(&tv, 0, sizeof(struct timeval));
+  gettimeofday(&tv, NULL);
+  *t = tv.tv_sec;
+  *v = tv.tv_usec;
+}
+
+int ppp(int port_linger, char *ip_linger)
+{
+  int sock = socket(AF_INET,SOCK_STREAM, 0);
+  if(sock < 0)
+  {
+    perror("socket");
+    destroy_everything();
+    return -1;
+  }
+
+  struct sockaddr_in server;
+  struct sockaddr_in local;
+  server.sin_family = AF_INET;
+  server.sin_port = htons(port_linger);
+  server.sin_addr.s_addr = inet_addr(ip_linger);
+  socklen_t len = sizeof(struct sockaddr_in);
+
+  local.sin_family = AF_INET;
+  local.sin_port = htons(PORT_LINGER);
+  local.sin_addr.s_addr = htonl(INADDR_ANY);
+
+  socklen_t len1 = sizeof(local);
+  if(bind(sock,(struct sockaddr*)&local , len1) < 0)
+  {
+    perror("bind");
+    destroy_everything();
+    return -1;
+  }
+
+  if(connect(sock, (struct sockaddr*)&server, len) < 0 )
+  {
+    perror("connect");
+    destroy_everything();
+    return -1;
+  }
+
+  return sock;
+}
+
+int check_cwnd(int sock, char *ip_src, char *ip_dst, __be16 src_port, __be16 dst_port)
+{
+  char buf[1024];
+  __u32 sec0 = 0;
+  __u32 usec0 = 0;
+  __u32 sec1 = 0, usec1 = 0;
+  __u32 duration = 0;
+  int ret = 0;
+  struct tcp_ss *tmp = NULL;
+  // char ip_src[] = "192.168.11.108";
+  // char ip_dst[] = "192.168.11.103";
+  // __be16 src_port = 12300;
+  // __be16 dst_port = 12301;
+  int len_ss;
+  ssize_t _s = 0;
+
+  len_ss = sizeof(struct tcp_ss) * sizeof(char);
+  tmp = (struct tcp_ss *)malloc(len_ss);
+  memset(tmp, 0, len_ss);
+
+  strcpy(tmp->ip_src, ip_src);
+  strcpy(tmp->ip_dst, ip_dst);
+  tmp->src_port = src_port;
+  tmp->dst_port = dst_port;
+  memcpy(buf, tmp, len_ss);
+  write(sock, buf, len_ss);
+  // if (sendto(sock, buf, strlen(buf) , 0 , (struct sockaddr *) &si_other, slen)==-1)
+  // {
+  //     die("sendto()");
+  // }
+  get_systime_linger(&sec0, &usec0);
+  _s = read(sock, buf, sizeof(buf) - 1);
+  if (_s > 0)
+  {
+    struct cwnd_mss tmp;
+    int leng_int = sizeof(struct cwnd_mss);
+    memset(&tmp, 0, leng_int);
+    memcpy(&tmp, buf, leng_int);
+    printf("window is %d \t %d\n", tmp.cwnd, tmp.mss);
+    ret = tmp.cwnd * tmp.mss;
+  }
+  get_systime_linger(&sec1, &usec1);
+  duration = (sec1 - sec0) * 1000000 + (usec1 - usec0);
+  printf("%u\n", duration);
+  return ret;
+}
+
 
 
 /* Default fields to use for prefix tries in each flow table, unless something
@@ -3404,336 +4394,34 @@ handle_echo_request(struct ofconn *ofconn, const struct ofp_header *oh)
   ofconn_send_reply(ofconn, make_echo_reply(oh));
   return 0;
 }
-static enum ofperr handle_experimenter(struct ofconn *ofconn, const struct ofp_header *oh)
+
+static enum ofperr handle_experimenter(const struct ofpbuf *msg)
 {
-  // struct station_information station;
-  // int tmp = 0;
-  // struct nl_msg *msg;
-  // tmp = print_survey_handler(msg, NULL, &station);
-  // VLOG_INFO("abc1111111111 %lu\t%lu\n", station.s_active_time, station.s_busy_time);
-  return 0;
+    // struct station_information station;
+    // int tmp = 0;
+    // struct nl_msg *msg;
+    // tmp = print_survey_handler(msg, NULL, &station);
+    // VLOG_INFO("abc1111111111 %lu\t%lu\n", station.s_active_time, station.s_busy_time);
+    handle_msg(msg);
+    return 0;
 }
-// static void handle_tree(char * inputtxt)
-
-/**
- * 0010 0100 -> 0100 0010
- * @param value 0010 0100
- */
-// void reversebytes_uint32t(__u32 *value)
-// {
-//   *value = (*value & 0x000000FFU) << 24 | (*value & 0x0000FF00U) << 8 |
-//   (*value & 0x00FF0000U) >> 8 | (*value & 0xFF000000U) >> 24;
-// }
-// void reversebytes_uint16t(__u16 *value)
-// {
-//   *value = (*value & 0x00FF) << 8 |(*value & 0xFF00) >> 8;
-// }
-// void reversebytes_uint64t(__u64 *value)
-// {
-//   __u64 low = (*value & 0x00000000FFFFFFFF);
-//   __u64 high = (*value & 0xFFFFFFFF00000000) >> 32;
-//   __u32 low_32 = (__u32) low;
-//   __u32 high_32 = (__u32) high;
-//   reversebytes_uint32t(&low_32);
-//   reversebytes_uint32t(&high_32);
-//   low = ((__u64) low_32) << 32;
-//   high = ((__u64) high_32);
-//   *value = low | high;
-// }
-// /**
-//  * [set_cwnd get a flow structure tflow, and return ofctl command.]
-//  * @param  cwnd  cwnd value to set
-//  * @param  tflow flow structure
-//  */
-// void set_cwnd(int cwnd, struct tcp_flow* tflow, char *ret, int size)
-// {
-//   int i = 0;
-//   char ip_src[20];
-//   char ip_dst[20];
-//   char buff[200];
-//   unsigned char *ptr_uc;
-//   ptr_uc = (unsigned char *)&(tflow->ip_src);
-//   sprintf(ip_src,"%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
-//   ptr_uc = (unsigned char *)&(tflow->ip_dst);
-//   sprintf(ip_dst,"%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
-//   reversebytes_uint16t(&(tflow->winsize));
-//   reversebytes_uint16t(&(tflow->sourceaddr));
-//   reversebytes_uint16t(&(tflow->destination));
-
-//   cwnd = tflow->winsize - cwnd;
-//     // printf("ip_src %s ip_dst %s cwnd %d\n", ip_src, ip_dst, tflow->winsize);
-
-
-//   memset(buff, 0, 200);
-//   sprintf(buff, "ovs-ofctl add-flow br0 -O openflow13 tcp,nw_dst=%s,nw_dst=%s,tcp_src=%d,tcp_dst=%d,actions=set_rwnd:%d",
-//     ip_src, ip_dst, tflow->sourceaddr, tflow->destination, cwnd);
-//     // printf("%s\n", buff);
-//   strncpy(ret, buff, size);
-// }
-
-// static void handle_tree(char *inputtxt)
-// {
-
-
-//     // char inputtxt[] = "0,0,requeues_3,5119.855,0|0,1,transmit_time_1,110.161,2|1,2,receive_time_2,172.118,2|2,3,leaf,0,2|2,4,leaf,0,2|1,5,noise_3,-90.5,2|5,6,allpackets_1,197.5,2|6,7,leaf,0,2|6,8,leaf,0,2|5,9,leaf,0,2|0,10,busy_time_1,809.357,0|10,11,retrans_4,15.5,0|11,12,allpackets_1,168.5,0|12,13,requeues_3,9445.064,0|13,14,receive_time_3,244.847,0|14,15,leaf,0,0|14,16,leaf,0,0|13,17,retrans_5,12.5,0|17,18,leaf,0,0|17,19,leaf,0,0|12,20,retrans_5,14.5,0|20,21,transmit_time_3,96.367,0|21,22,allpackets_3,103.5,0|22,23,leaf,0,0|22,24,leaf,0,0|21,25,leaf,0,0|20,26,allpackets_3,203.5,0|26,27,leaf,0,1|26,28,leaf,0,0|11,29,leaf,0,0|10,30,leaf,0,2";
-//   char *str = NULL;
-
-//   const char * split = "|";
-//   char * p;
-//   struct rawdata *node = NULL, *nodeptr = NULL;
-//   struct treenode *tnode = NULL;
-//   char *outer_ptr = NULL;
-//   char *inner_ptr = NULL;
-//   char **parameters;
-//     // struct item_value *value[80];
-//   int i = 0;
-
-
-
-//   char *data = "flows";
-//   char *data1 = "states";
-//   struct sockaddr_nl  local, dest_addr;
-
-//   int skfd;
-//   struct nlmsghdr *nlh = NULL;
-//   struct _my_msg info;
-//   int ret;
-//   struct tcp_flow control;
-//   struct apstates apst;
-//   char ret_none[10];
-
-//   // char inputtxt[] = "0,0,requeues_3,5158.975,0|0,1,busy_time_1,808.831,2|1,2,leaf,0,2|1,3,allpackets_1,150.5,2|3,4,leaf,0,2|3,5,requeues_1,678.932,2|5,6,drops_1,3211.45,2|6,7,leaf,0,2|6,8,leaf,0,2|5,9,leaf,0,2|0,10,busy_time_1,808.542,0|10,11,retrans_4,14.5,0|11,12,allpackets_3,182.5,0|12,13,retrans_5,14.5,0|13,14,retrans_3,0.5,0|14,15,receive_time_1,122.551,0|15,16,leaf,0,0|15,17,leaf,0,1|14,18,transmit_time_4,32.177,0|18,19,leaf,0,0|18,20,leaf,0,0|13,21,leaf,0,0|12,22,allpackets_1,202.5,0|22,23,rbytes_3,257018.672,0|23,24,leaf,0,0|23,25,allpackets_1,170.5,0|25,26,leaf,0,0|25,27,leaf,0,0|22,28,leaf,0,0|11,29,leaf,0,0|10,30,leaf,0,2";
-//   // char item[] = "requeues_3,5000;busy_time_1,809;allpackets_1,160;requeues_1,670;drops_1,3220;retrans_4,0;allpackets_3,0;retrans_5,0;retrans_3,0;receive_time_1,0;transmit_time_4,0;rbytes_3,0";
-//   struct treenode* search_results = NULL;
-
-
-
-
-//   str = inputtxt;
-//   p = strtok_r(str, split, &outer_ptr);
-//   while(p!=NULL)
-//   {
-//     char * tmp = NULL;
-//     char * q;
-//     struct rawdata *newnode = NULL;
-//     int k = 0;
-//     const char *split1 = ",";
-//         // //printk(KERN_INFO "%s\n", p);
-//     tmp = p;
-//     q = strtok_r(tmp, split1, &inner_ptr);
-//     k = 0;
-//     newnode = (struct rawdata *)malloc(sizeof(struct rawdata));
-//     memset(newnode, 0, sizeof(struct rawdata));
-//     while(q != NULL)
-//     {
-//       if(k == 0)
-//         newnode->father = atoi(q);
-//       if(k == 1)
-//       {
-//         newnode->itself = atoi(q);
-//       }
-//       if(k == 2)
-//       {
-//         int len = strlen(q);
-//         newnode->name = (char *)malloc(sizeof(char) * len);
-//         memset(newnode->name, 0, sizeof(char) * len);
-//         strcpy(newnode->name , q);
-//       }
-//       if(k == 3)
-//         newnode->value = atof(q);
-//       if(k == 4)
-//         newnode->class = atoi(q);
-//       k = k + 1;
-//       q = strtok_r(NULL, split1, &inner_ptr);
-//     }
-//     if(node == NULL)
-//     {
-//       node = newnode;
-//       node->next = NULL;
-//       nodeptr = node;
-//     }
-//     else
-//     {
-//       nodeptr->next = newnode;
-//       nodeptr = newnode;
-//       nodeptr->next = NULL;
-//     }
-//     p = strtok_r(NULL,split, &outer_ptr);
-//   }
-//   tnode = create_tree(node, NULL);
-//   print_tree(tnode);
-//   VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
-//   parameters = get_parameters(node);
-//   while(parameters[i])
-//   {
-//     VLOG_INFO("%d: %s\t", i, parameters[i]);
-//     i = i + 1;
-//   }
-// /////////////////////////////////
-//   skfd = socket(AF_NETLINK, SOCK_RAW, USER_MSG);
-//   if(skfd == -1)
-//   {
-//     printf("create socket error...%s\n", strerror(errno));
-//     return -1;
-//   }
-
-//   memset(&local, 0, sizeof(local));
-//   local.nl_family = AF_NETLINK;
-//   local.nl_pid = 50;
-//   local.nl_groups = 0;
-//   if(bind(skfd, (struct sockaddr *)&local, sizeof(local)) != 0)
-//   {
-//     printf("bind() error\n");
-//     close(skfd);
-//     return -1;
-//   }
-
-//   memset(&dest_addr, 0, sizeof(dest_addr));
-//   dest_addr.nl_family = AF_NETLINK;
-//     dest_addr.nl_pid = 0; // to kernel
-//     dest_addr.nl_groups = 0;
-
-//     nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MAX_PLOAD));
-//     memset(nlh, 0, sizeof(struct nlmsghdr));
-//     nlh->nlmsg_len = NLMSG_SPACE(MAX_PLOAD);
-//     nlh->nlmsg_flags = 0;
-//     nlh->nlmsg_type = 0;
-//     nlh->nlmsg_seq = 0;
-//     nlh->nlmsg_pid = local.nl_pid; //self port
-
-//     memcpy(NLMSG_DATA(nlh), data, strlen(data));
-//     ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
-
-//     if(!ret)
-//     {
-//       perror("sendto error1\n");
-//       close(skfd);
-//       exit(-1);
-//     }
-//     printf("wait kernel msg!\n");
-//     memset(&info, 0, sizeof(info));
-//     ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-//     memcpy(&control, info.data, sizeof(struct tcp_flow));
-//     for(i = 0; i < control.ip_src; i++)
-//     {
-//       char *ret1 = NULL;
-//       struct tcp_flow tmp;
-//       memset(&tmp, 0, sizeof(struct tcp_flow));
-//       ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-//         // printf("xxxx\n");
-//       memcpy(&tmp, info.data, sizeof(struct tcp_flow));
-//       printf("winsize is : %u %d  %u %u %d\n", tmp.ip_src, tmp.winsize, tmp.sourceaddr, tmp.destination, ret);
-//       ret1 = malloc(sizeof(char) * 200);
-//       set_cwnd(2, &tmp, ret1, 200);
-//       printf("ret is %s\n", ret1);
-//     }
-//     if(!ret)
-//     {
-//       perror("recv form kernel error\n");
-//       close(skfd);
-//       exit(-1);
-//     }
-
-
-//     memcpy(NLMSG_DATA(nlh), data1, strlen(data1));
-//     ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
-
-//     if(!ret)
-//     {
-//       perror("sendto error1\n");
-//       close(skfd);
-//       exit(-1);
-//     }
-//     printf("xxx!\n");
-//     memset(&info, 0, sizeof(info));
-//     ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-//     printf("23\n");
-//     memset(ret_none, 0, 10);
-//     memcpy(ret_none, info.data, 8);
-//     if(!strcmp(ret_none, "nonedata"))
-//     {
-//       printf("333%s\n", ret_none);
-//     }
-//     else
-//     {
-//       memset(&apst, 0, sizeof(struct apstates));
-//       memcpy(&apst, info.data, sizeof(struct apstates));
-//       // reversebytes_uint32t(&(apst.sec));
-//       // reversebytes_uint32t(&(apst.usec));
-//       // reversebytes_uint64t(&(apst.time_busy));
-//       // reversebytes_uint64t(&(apst.time_ext_busy));
-//       printf("%u %u %u %llu %llu %llu %d\n", apst.sec, apst.usec, apst.drop_count, apst.time, apst.time_busy, apst.time_ext_busy, sizeof(struct apstates));
-//   }
-
-//     if(!ret)
-//     {
-//       perror("recv form kernel error\n");
-//       close(skfd);
-//       exit(-1);
-//     }
-
-//     search_results = bst_search(tnode, items_list);
-//     if(search_results)
-//     {
-//       printf("found\n");
-//     }
-//     // printf("ad\n");
-//     else
-//       printf("not found\n");
-//   // get_flows();
-
-//     // printf("msg receive from kernel:%s\n", info.data);
-//     close(skfd);
-
-//     free((void *)nlh);
-
-// //////////////////////////////////
-
-
-//   VLOG_INFO("\n");
-//   destroy_parameters(parameters);
-//   destroy_tree(tnode);
-//   free_rawdata(node);
-//     // return 0;
-
-// }
-
-void handle_msg(struct ofpbuf *msg)
+void handle_msg(const struct ofpbuf *msg)
 {
-  struct iw * iwlist = NULL;
+  	// struct iw * iwlist = NULL;
   char * msg_rec = NULL;
   int length = 0;
-  // VLOG_INFO("msg data is %s", msg->data + 16);
+
 
   length = msg->size - 15;
-  // length = 104;
-  // VLOG_INFO("msg header is %s\n", msg->header);
-  // VLOG_INFO("msg size is %d msg allocated is %d\n", msg->size, msg->allocated);
-  VLOG_INFO("msg_before is %s %d", ofpbuf_to_string(msg, msg->size), length);
-  // VLOG_INFO("msg_after is %s", ofpbuf_onlydata_to_string(msg, msg->size));
-  // char *stringtmp = *(ofpbuf_onlydata_to_string(msg, msg->size) + 47);
-  // char * stringtmp;
-  // stringtmp = ofpbuf_onlydata_to_string(msg, msg->size) + 47;
-  // int ilen = strlen(stringtmp);
-  // int i = 0;
-  // VLOG_INFO("stringtmp len is %d\n", ilen);
-  // for(i = 0; i < ilen; i++)
-  // {
-  //     VLOG_INFO("%c", stringtmp[i]);
-  // }
-  // handle_tree(ofpbuf_to_string(msg, msg->size));
+
   msg_rec = (char *)malloc(sizeof(char) * length);
   memset(msg_rec, 0, sizeof(char) * length);
   // strcpy(msg_rec, length - 1);
-  memcpy(msg_rec, msg->data + 16, length - 1);
+  memcpy(msg_rec, (char *)msg->data + 16, length - 1);
   // msg_rec[length - 1] = '\0';
-  VLOG_INFO("msg_rec is %s\n", msg_rec);
-  // handle_tree(msg_rec);
-  // iwlist = process(msg_rec);
-  // print_iwlist(iwlist);
-  // free_iwlist(iwlist);
-  // handle_tree(msg_rec);
-  // main_linger();
+  // VLOG_INFO("msg_rec is %s\n", msg_rec);
+  init_linger_m(msg_rec);
+  main_linger();
   free(msg_rec);
   msg_rec = NULL;
 }
@@ -8568,8 +9256,9 @@ OVS_EXCLUDED(ofproto_mutex)
     // VLOG_INFO("msg_size is %d", ofpbuf_msgsize(msg));
     // VLOG_INFO("msg msg is %s\n", msg->msg);
 
-    handle_msg(msg);
-    return handle_experimenter(ofconn, oh);
+    // handle_msg(msg);
+    // handle_msg();
+    return handle_experimenter(msg);
   case OFPTYPE_FEATURES_REQUEST:
     return handle_features_request(ofconn, oh);
 
@@ -9283,1524 +9972,3 @@ ofproto_set_vlan_limit(int vlan_limit)
   flow_limit_vlans(vlan_limit);
 }
 
-// void free_rawdata(struct rawdata * head)
-// {
-//   struct rawdata * before = NULL;
-//   while(head)
-//   {
-//     before = head;
-//     head = head->next;
-//     free(before->name);
-//     before->name = NULL;
-//     free(before);
-//     before = NULL;
-//   }
-// }
-
-// void print_rawdata(struct rawdata* raw)
-// {
-//   while(raw != NULL)
-//   {
-//     printf("%d\t%d\t%s\t%f\t%d\n", raw->father, raw->itself, raw->name, raw->value, raw->class);
-//     raw = raw->next;
-//   }
-// }
-
-// struct treenode * create_tree(struct rawdata *ptr, struct treenode * parent)
-// {
-//   struct treenode * newnode = NULL;
-
-//   if(ptr != NULL)
-//   {
-//     newnode = (struct treenode *)malloc(sizeof(struct treenode));
-//     memset(newnode, 0, sizeof(struct treenode));
-//     newnode->name = (char *)malloc(sizeof(char) * strlen(ptr->name));
-//     newnode->itself = ptr->itself;
-//     strcpy(newnode->name, ptr->name);
-//     newnode->value = ptr->value;
-//     newnode->class = ptr->class;
-//     newnode->lchild = NULL;
-//     newnode->rchild = NULL;
-//     newnode->parent = NULL;
-//     if(strcmp(ptr->name, "-1") != 0)
-//     {
-//       struct rawdata *ptrtmp = NULL;
-//       ptrtmp = find_lchild(ptr->next, ptr->itself);
-//       newnode->lchild = create_tree(ptrtmp, newnode);
-//       ptrtmp = find_rchild(ptr->next, ptr->itself);
-//       newnode->rchild = create_tree(ptrtmp, newnode);
-//     }
-//   }
-//   return newnode;
-// }
-
-// void print_tree(struct treenode *raw)
-// {
-//   if(raw)
-//   {
-//     printf("%d\t%s\t%f\t%d\n", raw->itself, raw->name, raw->value, raw->class);
-//     print_tree(raw->lchild);
-//     print_tree(raw->rchild);
-//   }
-// }
-// void destroy_tree(struct treenode *T)
-// {
-//   if(T)
-//   {
-//     destroy_tree(T->lchild);
-//     destroy_tree(T->rchild);
-//     free(T->name);
-//     T->name = NULL;
-//     free(T);
-//     T = NULL;
-//   }
-// }
-// struct rawdata * find_lchild(struct rawdata *ptr, int father)
-// {
-//   while(ptr)
-//   {
-//     if(ptr->father == father)
-//     {
-//       return ptr;
-//     }
-//     ptr = ptr->next;
-//   }
-// }
-// struct rawdata * find_rchild(struct rawdata *ptr, int father)
-// {
-//   int rchild = 0;
-//   while(ptr)
-//   {
-//     if(ptr->father == father)
-//     {
-//       if(rchild == 1)
-//         return ptr;
-//       rchild = rchild + 1;
-//     }
-//     ptr = ptr->next;
-//   }
-// }
-
-// void generate_command(struct flow_linger *ptr, char *ret, int size)
-// {
-//   char buff[200];
-
-//   memset(buff, 0, 200);
-//   sprintf(buff, "ovs-ofctl add-flow br0 -O openflow13 tcp,nw_dst=%s,nw_dst=%s,tcp_src=%d,tcp_dst=%d,actions=set_rwnd:%d",
-//     ptr->ip_src, ptr->ip_dst, ptr->port_src, ptr->port_dst, ptr->winsize);
-//     // printf("%s\n", buff);
-//   strncpy(ret, buff, size);
-// }
-
-// int TreeDepth(struct treenode *T)
-// {
-//   int rightdep=0;
-//   int leftdep=0;
-
-//   if(T==NULL)
-//     return -1;
-
-//   if(T->lchild!=NULL)
-//     leftdep=TreeDepth(T->lchild);
-//   else
-//     leftdep=-1;
-
-//   if(T->rchild!=NULL)
-//     rightdep=TreeDepth(T->rchild);
-//   else
-//     rightdep=-1;
-
-//   return (rightdep>leftdep) ? rightdep+1 : leftdep+1;
-// }
-
-// struct treenode* bst_search(struct treenode* node, struct item_value value[])
-// {
-//   int found = 0;
-//   struct treenode* node_pre = NULL;
-//   node_pre = node;
-//   while(node && (strcmp(node->name, "leaf") != 0))
-//   {
-//     int i = 0;
-//     found = 0;
-//     for(i = 0; i < ITEM_AMOUNT; i++)
-//     {
-//       if(strcmp(node->name, value[i].name) == 0)
-//       {
-//         found = 1;
-//         break;
-//       }
-//       if(value[i].name == NULL)
-//         break;
-//     }
-//     if(found = 0)
-//       return NULL;
-//     if(value[i].value <= node->value)
-//     {
-//       node_pre =node;
-//       node = node->lchild;
-//     }
-//     else
-//     {
-//       node_pre =node;
-//       node = node->rchild;
-//     }
-//   }
-//   if(found)
-//   {
-//     printf("1 name %s value %f\n", node_pre->name, node_pre->value);
-//     return node;
-//   }
-//   else
-//   {
-//     printf("2 name %s value %f\n", node_pre->name, node_pre->value);
-//     return node_pre;
-//   }
-// }
-
-// char ** get_parameters(struct rawdata *ptr)
-// {
-//   char **tmp;
-//   int i = 0, found = 0, last = 0;
-//   tmp = (char **)malloc(80 * sizeof(char *));
-//   for(i = 0; i < 80; i++)
-//   {
-//     tmp[i] = NULL;
-//   }
-//   while(ptr)
-//   {
-//     char *str = NULL;
-//     if(strcmp(ptr->name, "leaf") == 0)
-//     {
-//       ptr = ptr->next;
-//       continue;
-//     }
-//     i = 0;
-//     found = 0;
-//     while(i < last)
-//     {
-//       if(strcmp(tmp[i], ptr->name) == 0)
-//       {
-//         found = 1;
-//         break;
-//       }
-//       i = i + 1;
-//     }
-//     if(found == 1)
-//     {
-//       ptr = ptr->next;
-//       continue;
-//     }
-//     else
-//     {
-//       tmp[last] = (char *)malloc(sizeof(char) * strlen(ptr->name));
-//       memset(tmp[last], 0, sizeof(char) * strlen(ptr->name));
-//       strcpy(tmp[last], ptr->name);
-//       last = last + 1;
-//     }
-
-//     ptr = ptr->next;
-//   }
-//   return tmp;
-// }
-// void destroy_parameters(char *ptr[80])
-// {
-//   int i = 0;
-//   for(i = 0; i < 80; i++)
-//   {
-//     free(ptr[i]);
-//   }
-//   free(ptr);
-// }
-
-// int create_items(struct item_value items_list[], char *buffer)
-// {
-//   int j,in = 0;
-//   // char buffer[] = "requeues_3,5000;busy_time_1,809;allpackets_1,160;requeues_1,670;drops_1,3220;retrans_4,0;allpackets_3,0;retrans_5,1;retrans_3,0;receive_time_1,0;transmit_time_4,0;rbytes_3,0";
-//   char *p[40];
-//   int index = 0;
-//   char *buf = buffer;
-//   char *outer_ptr = NULL;
-//   char *inner_ptr = NULL;
-//   while ((p[in] = strtok_r(buf, ";", &outer_ptr)) != NULL)
-//   {
-//     buf = p[in];
-//     while ((p[in] = strtok_r(buf, ",", &inner_ptr)) != NULL)
-//     {
-//       in++;
-//       buf = NULL;
-//     }
-//     buf = NULL;
-//   }
-//   // printf("Here we have %d strings\n", in);
-//   for (j = 0; j < in; j++)
-//   {
-//     if(j % 2 ==  0)
-//     {
-//       // printf("name: %s\n", p[j]);
-//       items_list[index].name = (char *)malloc(sizeof(char) * strlen(p[j]));
-//       memset(items_list[index].name, 0, sizeof(char) * strlen(p[j]));
-//       strcpy(items_list[index].name, p[j]);
-//     }
-//     else
-//     {
-//       // printf("value: %s %f\n", p[j], atof(p[j]));
-//       items_list[index].value = atof(p[j]);
-//       if(index >= ITEM_AMOUNT)
-//       {
-//         printf("outrage\n");
-//         exit(-1);
-//       }
-
-//       index = index + 1;
-//     }
-//   }
-// }
-
-// void destroy_item_list(struct item_value items_list[])
-// {
-//   int i = 0;
-//   while(items_list[i].name)
-//   {
-//     free(items_list[i].name);
-//     items_list[i].name = NULL;
-//   }
-// }
-
-// void free_iwlist(struct iw * head)
-// {
-//   struct iw * before = NULL;
-//     // int amount = 0;
-//   while(head)
-//   {
-//     before = head;
-//     head = head->next;
-//     free(before);
-//     before = NULL;
-//         // amount = amount + 1;
-//   }
-//     // printf("%d is the deleted nodes\n", amount);
-// }
-// void print_iwlist(struct iw * iwdata)
-// {
-//   while(iwdata != NULL)
-//   {
-//     VLOG_INFO("%d\t%d\t%d\t%d\t%d\t%d\n", iwdata->noise, iwdata->connected_time, iwdata->active_time, iwdata->busy_time, iwdata->receive_time, iwdata->transmit_time);
-//     iwdata = iwdata->next;
-//   }
-// }
-// struct iw * process(char *str)
-// {
-//   struct iw * iwlist = NULL;
-//   struct iw * ret = NULL;
-
-
-//   char *ptr_begin = NULL;
-//   char *ptr_end = NULL;
-//   char *period = NULL;
-//   int amount = 0;
-//   int i = 0;
-//   ptr_begin = str + 4;
-//   ptr_end = ptr_begin;
-//   while(*ptr_end != 'B')
-//   {
-//     ptr_end = ptr_end + 1;
-//   }
-//   if(ptr_end > ptr_begin)
-//   {
-//     period = (char *)malloc(sizeof(char) * (ptr_end - ptr_begin + 1));
-//     memset(period, 0, sizeof(char) * (ptr_end - ptr_begin));
-//     memcpy(period, ptr_begin, sizeof(char) * (ptr_end - ptr_begin));
-//     period[strlen(period)] = '\0';
-//     amount = atoi(period);
-//         // printf("%d is the amount\n", amount);
-//     free(period);
-//     period == NULL;
-//   }
-//   ptr_end = ptr_end + 1;
-//   ptr_begin = ptr_end;
-//   while(*ptr_end != '.')
-//   {
-//     if(*ptr_end == ';')
-//     {
-//       int control = 0;
-//       char *ptr = NULL;
-//       char *p = NULL;
-//       struct iw * iwdata;
-//       iwdata = (struct iw *)malloc(sizeof(struct iw));
-//       memset(iwdata, 0, sizeof(struct iw));
-//       period = (char *)malloc(sizeof(char) * (ptr_end - ptr_begin + 1));
-//       memset(period, 0, sizeof(char) * (ptr_end - ptr_begin));
-//       memcpy(period, ptr_begin, sizeof(char) * (ptr_end - ptr_begin));
-//       iwdata->next = NULL;
-//       period[strlen(period)] = '\0';
-//             // printf("%s is the period\n", period);
-//       ptr = strtok_r(period, ",", &p);
-//       control = 0;
-//       while(ptr != NULL)
-//       {
-//         switch(control)
-//         {
-//           case 0:
-//           iwdata->noise = atoi(ptr);
-//           case 1:
-//           iwdata->connected_time = atoi(ptr);
-//           case 2:
-//           iwdata->active_time = atoi(ptr);
-//           case 3:
-//           iwdata->busy_time = atoi(ptr);
-//           case 4:
-//           iwdata->receive_time = atoi(ptr);
-//           case 5:
-//           iwdata->transmit_time = atoi(ptr);
-//           default:
-//           break;
-//         }
-//                 // printf("ptr = %s\n", ptr);
-//         ptr = strtok_r(NULL, ",", &p);
-//         control = control + 1;
-//       }
-//       if(iwlist == NULL)
-//       {
-//         iwlist = iwdata;
-//         ret = iwdata;
-//                 // printf("address 11 = %p\n", iwlist);
-//       }
-//       else
-//       {
-//         iwlist->next = iwdata;
-//         iwlist = iwdata;
-//       }
-//             // printf("%d\t%d\t%d\t%d\t%d\t%d\n", iwdata->noise, iwdata->connected_time, iwdata->active_time, iwdata->busy_time, iwdata->receive_time, iwdata->transmit_time);
-//       ptr = NULL;
-//       p = NULL;
-//       free(period);
-//       period == NULL;
-//       ptr_begin = ptr_end + 1;
-//     }
-//     ptr_end = ptr_end + 1;
-//   }
-//   return ret;
-
-// }
-// /*
-// int main(void)
-// {
-//     char str[] = "AAAA8B1,2,3,4,5,6;2,2,3,4,5,6;3,2,3,4,5,6;4,2,3,4,5,6;5,2,3,4,5,6;6,2,3,4,5,6;7,2,3,4,5,6;8,2,3,4,5,6;.";
-//     struct iw * iwlist = NULL;
-//     char head[5];
-//     memcpy(head, str, sizeof(char) * 4);
-//     head[4] = '\0';
-
-//     if(strcmp(head, "AAAA") == 0)
-//     {
-//         iwlist = process(str);
-//         print_iwlist(iwlist);
-//         free_iwlist(iwlist);
-//     }
-
-//     return 0;
-// }
-// */
-
-// // int main()
-// // {
-// //     struct data_queue *queue = NULL;
-// //     queue = get_queue();
-// //     print_queue(queue);
-// //     return 0;
-// // }
-
-// struct data_queue * get_queue()
-// {
-//   FILE * p_file = NULL;
-//   char *p = NULL, *q = NULL;
-//   char *beg = NULL, *end = NULL;
-//   char oscmd[] = "tc -s class show dev wlan0";
-//   struct data_queue *queuelist = NULL, *queue = NULL;
-//   int control = 0;
-//   queue = (struct data_queue *)malloc(sizeof(struct data_queue));
-//   memset(queue, 0, sizeof(struct data_queue));
-//   p_file = popen(oscmd, "r");
-//   if (!p_file) {
-//     fprintf(stderr, "Error to popen");
-//   }
-//   while (fgets(buf, BUF_SIZE, p_file) != NULL)
-//   {
-//     fprintf(stdout, "%s", buf);
-//     if(strstr(buf, "class"))
-//     {
-//       control = 0;
-//     }
-//     switch(control)
-//     {
-//       case 0:
-//       control += 1;
-//       int value = 0;
-//       value = get_value(buf, "class mq :"," root");
-//       queue->queue_id = value;
-//       break;
-//       case 1:
-//       control += 1;
-//       queue->bytes = get_value(buf, "Sent ", " bytes");
-//       queue->packets = get_value(buf, "bytes ", " pkt");
-//       queue->drops = get_value(buf, " (", ", overlimits");
-//       queue->overlimits = get_value(buf, "overlimits ", " requeues");
-//       queue->requeues = get_value(buf, "requeues ", ")");
-//       break;
-//       case 2:
-//       control += 1;
-//       queue->backlog = get_value(buf, "backlog ", "b ");
-//       queue->qlen = get_value(buf, "b ", "p requeues");
-//       queue->next = NULL;
-//       if(!queuelist)
-//       {
-//         queuelist = (struct data_queue *)malloc(sizeof(struct data_queue));
-//         memset(queuelist, 0, sizeof(struct data_queue));
-//         queue->next = NULL;
-//         queuelist = queue;
-//       }
-//       else
-//       {
-//         struct data_queue * tmp = NULL;
-//         tmp = queuelist;
-//         while(tmp->next)
-//         {
-//           tmp = tmp->next;
-//         }
-//         tmp->next = queue;
-//       }
-//       queue = (struct data_queue *)malloc(sizeof(struct data_queue));
-//       memset(queue, 0, sizeof(struct data_queue));
-//       break;
-//       default:
-//       break;
-//     }
-//   }
-//   pclose(p_file);
-//   return queuelist;
-// }
-
-// int get_value(char *buf, char * strb, char * stre)
-// {
-//   if(!buf)
-//     return -1;
-//   int value = 0;
-//   char *end = NULL, *beg = NULL;
-//   end = strstr(buf, stre);
-//   beg = strstr(buf, strb) + strlen(strb);
-//   char * tmp = NULL;
-
-//   tmp = (char *)malloc(sizeof(char) * (end - beg + 1));
-//   tmp = memset(tmp, 0, sizeof(char) * (end - beg + 1));
-//   memcpy(tmp, beg, end - beg);
-//   tmp[end - beg] = '\0';
-//   value = atoi(tmp);
-//   free(tmp);
-//   tmp = NULL;
-//   return value;
-// }
-
-// void print_queue(struct data_queue *ptr)
-// {
-//   while(ptr)
-//   {
-//     printf("id %d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", ptr->queue_id, ptr->bytes, ptr->packets, ptr->qlen, ptr->backlog, ptr->drops, ptr->requeues, ptr->overlimits);
-//     ptr = ptr->next;
-//   }
-// }
-
-// struct data_iw
-// {
-//   char station[18];
-//   __u32 inactive_time;
-//   __u32 rx_bytes;
-//   __u32 rx_packets;
-//   __u32 tx_bytes;
-//   __u32 tx_packets;
-//   __u32 tx_retries;
-//   __u32 tx_failed;
-//   __s32 sig;
-//   __s32 signal_avg;
-//   __u32 ep;
-//   struct data_iw *next;
-// };
-// struct data_survey
-// {
-//   __s32 noise;
-//   __u32 frequency;
-//   __u32 connected_time;
-//   __u64 active_time;
-//   __u64 busy_time;
-//   __u64 receive_time;
-//   __u64 transmit_time;
-// };
-// struct iwinfo
-// {
-//   struct data_survey *survey;
-//   struct data_iw *iw;
-// };
-
-// // int main()
-// // {
-// //     get_iw();
-// //     return 0;
-// // }
-// int get_iw()
-// {
-//   FILE * p_file = NULL;
-//   char *p = NULL, *q = NULL;
-//   char *beg = NULL, *end = NULL;
-//   char oscmd[] = "iw dev wlan0 station dump && iw dev wlan0 survey dump";
-//   struct iwinfo *iwf = NULL;
-//   struct data_iw *iwstation = NULL;
-//   struct data_survey *iwsurvey = NULL;
-//   int control = 0;
-//   char str_tmp[20];
-//   struct data_iw station_new;
-
-//   p_file = popen(oscmd, "r");
-//   if (!p_file) {
-//     fprintf(stderr, "Erro to popen");
-//   }
-//   station_new.sig = -10000;
-//   while (fgets(buf, BUF_SIZE, p_file) != NULL) {
-//         // fprintf(stdout, "%s", buf);
-//     p = NULL;
-//     p = strstr(buf, "Station");
-//     if(p)
-//     {
-//       memset(&station_new, 0, sizeof(struct data_iw));
-//       control = 0;
-//     }
-//     else
-//     {
-//       q = strstr(buf, "Survey");
-//       if(q)
-//       {
-//                 // printf("afdsafas\n");
-//         iwsurvey = (struct data_survey *)malloc(sizeof(struct data_survey));
-//         memset(iwsurvey, 0, sizeof(struct data_survey));
-//                 // printf("baaaaa\n");
-//         control = 14;
-//       }
-//     }
-//         // printf("wocao %d\n", control);
-//     switch(control)
-//     {
-//       case 0:
-//       control = control + 1;
-//       end =  strstr(buf, " (on wlan0)");
-//       beg = buf + strlen("Station ");
-//                 // //printf("xx %s 11%s33  %s\n", beg, end, buf);
-//       memcpy(station_new.station, beg, (end - beg));
-//                 // //printf("yy\n");
-//       station_new.station[end - beg] = '\0';
-//                 //printf("%s\n", station_new.station);
-//       break;
-//       case 1:
-//       control += 1;
-//       end = strstr(buf, " ms");
-//       beg = buf + strlen("inactive time:  ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.inactive_time = atoi(str_tmp);
-//                 //printf("ss%d\n", station_new.inactive_time);
-//       break;
-//       case 2:
-//       control += 1;
-//       end = strstr(buf, "\n");
-//       beg = buf + strlen("rx bytes:   ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.rx_bytes = atoi(str_tmp);
-//                 //printf("rx_bytes%d\n", station_new.rx_bytes);
-//       break;
-
-//       case 3:
-//       control += 1;
-//       end = strstr(buf, "\n");
-//       beg = buf + strlen("rx packets: ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.rx_packets = atoi(str_tmp);
-//                 //printf("rx_packets%d\n", station_new.rx_packets);
-//       break;
-
-//       case 4:
-//       control += 1;
-//       end = strstr(buf, "\n");
-//       beg = buf + strlen("tx bytes:   ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.tx_bytes = atoi(str_tmp);
-//                 //printf("tx_bytes%d\n", station_new.tx_bytes);
-//       break;
-
-//       case 5:
-//       control += 1;
-//       end = strstr(buf, "\n");
-//       beg = buf + strlen("tx packets: ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.tx_packets = atoi(str_tmp);
-//                 //printf("tx_packets%d\n", station_new.tx_packets);
-//       break;
-//       case 6:
-//       control += 1;
-//       end = strstr(buf, "\n");
-//       beg = buf + strlen("tx retries: ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.tx_retries = atoi(str_tmp);
-//                 //printf("tx_retries%d\n", station_new.tx_retries);
-//       break;
-
-//       case 7:
-//       control += 1;
-//       end = strstr(buf, "\n");
-//       beg = buf + strlen("tx failed:  ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.tx_failed = atoi(str_tmp);
-//                 //printf("tx_failed%d\n", station_new.tx_failed);
-//       break;
-
-//       case 8:
-//       control += 1;
-//       end = strstr(buf, " dBm");
-//       beg = buf + strlen("signal:     ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.sig = atoi(str_tmp);
-//                 //printf("sig%d\n", station_new.sig);
-//       break;
-//       case 9:
-//       control += 1;
-//       end = strstr(buf, " dBm");
-//       beg = buf + strlen("signal avg: ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.signal_avg = atoi(str_tmp);
-//                 //printf("signal_avg%d\n", station_new.signal_avg);
-//       break;
-//       case 10:
-//       control += 1;
-//       break;
-//       case 11:
-//       control += 1;
-//       break;
-//       case 12:
-//       control += 1;
-//       end = strstr(buf, "Mbps");
-//       beg = buf + strlen("expected throughput:    ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       station_new.ep = atoi(str_tmp);
-//                 //printf("ep%d\n", station_new.ep);
-
-//       struct data_iw *iwtmp;
-//       iwtmp = (struct data_iw*)malloc(sizeof(struct data_iw));
-//       *iwtmp = station_new;
-//       iwtmp->next = NULL;
-//       if(iwf)
-//       {
-//         iwf->iw->next= iwtmp;
-//       }
-//       else
-//       {
-//         iwf = (struct iwinfo *)malloc(sizeof(struct iwinfo));
-//         memset(iwf, 0, sizeof(struct iwinfo));
-//         iwf->survey = NULL;
-//         iwf->iw = iwtmp;
-//       }
-
-//       break;
-//       case 14:
-//       control += 1;
-//       if(!iwf)
-//       {
-//         iwf = (struct iwinfo *)malloc(sizeof(struct iwinfo));
-//         memset(iwf, 0, sizeof(struct iwinfo));
-//         iwf->iw = NULL;
-//       }
-//       break;
-//       case 15:
-//       control += 1;
-//       end = strstr(buf, " MHz");
-//       beg = buf + strlen("frequency:          ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       iwsurvey->frequency = atoi(str_tmp);
-//                 //printf("frequency%d\n", iwsurvey->frequency);
-//       break;
-//       case 16:
-//       control += 1;
-//       end = strstr(buf, " dBm");
-//       beg = buf + strlen("noise:              ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       iwsurvey->noise = atof(str_tmp);
-//                 //printf("noise%d\n", iwsurvey->noise);
-//       break;
-
-//       case 17:
-//       control += 1;
-//       end = strstr(buf, " ms");
-//       beg = buf + strlen("channel active time:        ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       iwsurvey->active_time = atoi(str_tmp);
-//                 //printf("active_time%d\n", iwsurvey->active_time);
-//       break;
-//       case 18:
-//       control += 1;
-//       end = strstr(buf, " ms");
-//       beg = buf + strlen("channel busy time:      ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       iwsurvey->busy_time = atoi(str_tmp);
-//                 //printf("busy_time%d\n", iwsurvey->busy_time);
-//       break;
-//       case 19:
-//       control += 1;
-//       end = strstr(buf, " ms");
-//       beg = buf + strlen("channel receive time:       ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       iwsurvey->receive_time = atoi(str_tmp);
-//                 //printf("receive_time%d\n", iwsurvey->receive_time);
-//       break;
-//       case 20:
-//       control += 1;
-//       end = strstr(buf, " ms");
-//       beg = buf + strlen("channel transmit time:      ");
-//       memset(str_tmp, 0, strlen(str_tmp));
-//       memcpy(str_tmp, beg, (end - beg));
-//       str_tmp[end - beg] = '\0';
-//       iwsurvey->transmit_time = atoi(str_tmp);
-//                 //printf("transmit_time%d\n", iwsurvey->transmit_time);
-//       iwf->survey = iwsurvey;
-//       break;
-
-//       default:
-//       break;
-
-//     }
-//   }
-//   if(iwf)
-//   {
-//     if(iwf->iw)
-//     {
-//       print_iw(iwf->iw);
-//     }
-//     if(iwf->survey)
-//     {
-//       print_survey(iwf->survey);
-//     }
-//   }
-//   delete_nodes(iwf);
-//   pclose(p_file);
-//   return 0;
-// }
-
-// void print_iw(struct data_iw *ptr)
-// {
-//   while(ptr)
-//   {
-//     printf("station %s inactive_time %lu\n", ptr->station, ptr->inactive_time);
-//     ptr = ptr->next;
-//   }
-// }
-// void print_survey(struct data_survey *ptr)
-// {
-//   if(ptr)
-//     printf("noise %d frequency %lu\n", ptr->noise, ptr->frequency);
-// }
-// int delete_nodes(struct iwinfo * ptr)
-// {
-//   if(!ptr)
-//     return 0;
-//   struct data_iw *iwtmp = NULL;
-//   iwtmp = ptr->iw;
-//   while(iwtmp)
-//   {
-//     struct data_iw *pre = NULL;
-//     pre = iwtmp;
-//     iwtmp = iwtmp->next;
-//     free(pre);
-//     pre = NULL;
-//   }
-//   if(ptr->survey)
-//   {
-//     free(ptr->survey);
-//     ptr->survey = NULL;
-//   }
-//   return 0;
-// }
-/**
- * 0010 0100 -> 0100 0010
- * @param value 0010 0100
- */
-void reversebytes_uint32t(__u32 *value)
-{
-  *value = (*value & 0x000000FFU) << 24 | (*value & 0x0000FF00U) << 8 |
-           (*value & 0x00FF0000U) >> 8 | (*value & 0xFF000000U) >> 24;
-}
-void reversebytes_uint16t(__u16 *value)
-{
-  *value = (*value & 0x00FF) << 8 | (*value & 0xFF00) >> 8;
-}
-void reversebytes_uint64t(__u64 *value)
-{
-  __u64 low = (*value & 0x00000000FFFFFFFF);
-  __u64 high = (*value & 0xFFFFFFFF00000000) >> 32;
-  __u32 low_32 = (__u32) low;
-  __u32 high_32 = (__u32) high;
-  reversebytes_uint32t(&low_32);
-  reversebytes_uint32t(&high_32);
-  low = ((__u64) low_32) << 32;
-  high = ((__u64) high_32);
-  *value = low | high;
-}
-/**
- * [set_cwnd get a flow structure tflow, and return ofctl command.]
- * @param  cwnd  cwnd value to set
- * @param  tflow flow structure
- */
-void set_cwnd(int class1, struct tcp_flow* tflow, char *ret, int size)
-{
-  int i = 0;
-  char ip_src[20];
-  char ip_dst[20];
-  char buff[200];
-  int cwnd = 0;
-  unsigned char *ptr_uc;
-  ptr_uc = (unsigned char *) & (tflow->ip_src);
-  sprintf(ip_src, "%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
-  ptr_uc = (unsigned char *) & (tflow->ip_dst);
-  sprintf(ip_dst, "%u.%u.%u.%u", ptr_uc[0], ptr_uc[1], ptr_uc[2], ptr_uc[3]);
-  reversebytes_uint16t(&(tflow->winsize));
-  reversebytes_uint16t(&(tflow->sourceaddr));
-  reversebytes_uint16t(&(tflow->destination));
-
-  switch (class1)
-  {
-  case 1:
-    cwnd = tflow->winsize;
-    break;
-  case 2:
-    cwnd = tflow->winsize * 3 / 4;
-    break;
-  case 3:
-    cwnd = tflow->winsize / 2;
-    break;
-  case 4:
-    cwnd = 1;
-  }
-  // VLOG_INFO("%d\n", cwnd);
-  // VLOG_INFO("ip_src %s ip_dst %s cwnd %d\n", ip_src, ip_dst, tflow->winsize);
-
-
-  memset(buff, 0, 200);
-  sprintf(buff, "ovs-ofctl add-flow br0 -O openflow13 tcp,nw_dst=%s,nw_dst=%s,tcp_src=%d,tcp_dst=%d,actions=mod_tp_dst:%d",
-          ip_src, ip_dst, tflow->sourceaddr, tflow->destination, cwnd);
-  // VLOG_INFO("%s\n", buff);
-  strncpy(ret, buff, size);
-}
-
-static int main_linger(void)
-{
-  char *data = "flows";
-  char *data1 = "states";
-  struct sockaddr_nl  local, dest_addr;
-
-  int skfd;
-  struct nlmsghdr *nlh = NULL;
-  struct _my_msg info;
-  int ret;
-  struct tcp_flow control;
-  struct apstates apst;
-  char ret_none[10];
-  int i;
-  // VLOG_INFO("11");
-  char inputtxt[] = "0,0,requeues_3,5158.975,0|0,1,busy_time_1,808.831,2|1,2,leaf,0,2|1,3,allpackets_1,150.5,2|3,4,leaf,0,2|3,5,requeues_1,678.932,2|5,6,drops_1,3211.45,2|6,7,leaf,0,2|6,8,leaf,0,2|5,9,leaf,0,2|0,10,busy_time_1,808.542,0|10,11,retrans_4,14.5,0|11,12,allpackets_3,182.5,0|12,13,retrans_5,14.5,0|13,14,retrans_3,0.5,0|14,15,receive_time_1,122.551,0|15,16,leaf,0,0|15,17,leaf,0,1|14,18,transmit_time_4,32.177,0|18,19,leaf,0,0|18,20,leaf,0,0|13,21,leaf,0,0|12,22,allpackets_1,202.5,0|22,23,rbytes_3,257018.672,0|23,24,leaf,0,0|23,25,allpackets_1,170.5,0|25,26,leaf,0,0|25,27,leaf,0,0|22,28,leaf,0,0|11,29,leaf,0,0|10,30,leaf,0,2";
-  char item[] = "requeues_3,5000;busy_time_1,809;allpackets_1,160;requeues_1,670;drops_1,3220;retrans_4,0;allpackets_3,0;retrans_5,0;retrans_3,0;receive_time_1,0;transmit_time_4,0;rbytes_3,0";
-  struct treenode* search_results = NULL;
-
-  init_linger(inputtxt, item);
-  VLOG_INFO("12");
-  skfd = socket(AF_NETLINK, SOCK_RAW, USER_MSG);
-  if (skfd == -1)
-  {
-    VLOG_INFO("create socket error...%s\n", strerror(errno));
-    return -1;
-  }
-  VLOG_INFO("13");
-  memset(&local, 0, sizeof(local));
-  local.nl_family = AF_NETLINK;
-  local.nl_pid = 50;
-  local.nl_groups = 0;
-  if (bind(skfd, (struct sockaddr *)&local, sizeof(local)) != 0)
-  {
-    VLOG_INFO("bind() error\n");
-    close(skfd);
-    return -1;
-  }
-  VLOG_INFO("14");
-  memset(&dest_addr, 0, sizeof(dest_addr));
-  dest_addr.nl_family = AF_NETLINK;
-  dest_addr.nl_pid = 0; // to kernel
-  dest_addr.nl_groups = 0;
-
-  nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MAX_PLOAD));
-  memset(nlh, 0, sizeof(struct nlmsghdr));
-  nlh->nlmsg_len = NLMSG_SPACE(MAX_PLOAD);
-  nlh->nlmsg_flags = 0;
-  nlh->nlmsg_type = 0;
-  nlh->nlmsg_seq = 0;
-  nlh->nlmsg_pid = local.nl_pid; //self port
-  VLOG_INFO("14");
-  memcpy(NLMSG_DATA(nlh), data, strlen(data));
-  ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
-  VLOG_INFO("15");
-  if (!ret)
-  {
-    perror("sendto error1\n");
-    close(skfd);
-    exit(-1);
-  }
-  VLOG_INFO("wait kernel msg!\n");
-  memset(&info, 0, sizeof(info));
-  ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-  memcpy(&control, info.data, sizeof(struct tcp_flow));
-
-  if (!ret)
-  {
-    perror("recv form kernel error\n");
-    close(skfd);
-    exit(-1);
-  }
-
-
-  memcpy(NLMSG_DATA(nlh), data1, strlen(data1));
-  ret = sendto(skfd, nlh, nlh->nlmsg_len, 0, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_nl));
-
-  if (!ret)
-  {
-    perror("sendto error1\n");
-    close(skfd);
-    exit(-1);
-  }
-  memset(&info, 0, sizeof(info));
-  ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-  memset(ret_none, 0, 10);
-  memcpy(ret_none, info.data, 8);
-  if (!strcmp(ret_none, "nonedata"))
-  {
-    VLOG_INFO("333%s\n", ret_none);
-  }
-  else
-  {
-    float times = 0.000001;
-    struct item_value fstates[14];
-    int i = 0;
-    char len[14][20] = {"drop_count", "time_busy", "time_ext_busy", "time_rx", "time_tx", "time_scan", "noise", "packets", "bytes", "qlen", "backlog", "drops", "requeues", "overlimits"};
-    // memset(&fstates, 0, sizeof(struct apstates_float));
-    memset(&apst, 0, sizeof(struct apstates));
-    memcpy(&apst, info.data, sizeof(struct apstates));
-    // reversebytes_uint32t(&(apst.sec));
-    // reversebytes_uint32t(&(apst.usec));
-    // reversebytes_uint64t(&(apst.time_busy));
-    // reversebytes_uint64t(&(apst.time_ext_busy));
-    VLOG_INFO("%u %u %u %llu %llu %llu %d\n", apst.sec, apst.usec, apst.drop_count, apst.time, apst.time_busy, apst.time_ext_busy, sizeof(struct apstates));
-    // VLOG_INFO("%d\n", drop_count);
-    fstates[drop_count].value = ((float)apst.drop_count) * times;
-    assign_string(&fstates[drop_count], "drop_count");
-    // VLOG_INFO("%02x %f\n", &(fstates[drop_count]), fstates[drop_count].value);
-    fstates[time_busy].value = ((float)apst.time_busy) * times;
-    assign_string(&fstates[time_busy] , "time_busy");
-    fstates[time_ext_busy].value = ((float)apst.time_ext_busy) * times;
-    assign_string(&fstates[time_ext_busy] , "time_ext_busy");
-    fstates[time_rx].value = ((float)apst.time_rx) * times;
-    assign_string(&fstates[time_rx] , "time_rx");
-    fstates[time_tx].value = ((float)apst.time_tx) * times;
-    assign_string(&fstates[time_tx], "time_tx");
-    fstates[time_scan].value = ((float)apst.time_scan) * times;
-    assign_string(&fstates[time_scan] , "time_scan");
-    fstates[noise].value = (float)apst.noise;
-    assign_string(&fstates[noise] , "noise");
-    fstates[packets].value = ((float)apst.packets) * times;
-    assign_string(&fstates[packets] , "packets");
-    fstates[bytes].value = ((float)apst.bytes * times);
-    assign_string(&fstates[bytes] , "bytes");
-    fstates[qlen].value = ((float)apst.qlen);
-    assign_string(&fstates[qlen] , "qlen");
-    fstates[backlog].value = ((float)apst.backlog);
-    assign_string(&fstates[backlog] , "backlog");
-    fstates[drops].value = ((float)apst.drops);
-    assign_string(&fstates[drops] , "drops");
-    fstates[requeues].value = ((float)requeues * times);
-    assign_string(&fstates[requeues] , "requeues");
-    fstates[overlimits].value = ((float)overlimits * times);
-    assign_string(&fstates[overlimits] , "overlimits");
-    VLOG_INFO("def %d\n", overlimits);
-    for (i = 0; i < 14; i++)
-      VLOG_INFO("%f\n", fstates[i].value);
-    search_results = bst_search(tnode, fstates, 14);
-    if (search_results)
-    {
-      for (i = 0; i < control.ip_src; i++)
-      {
-        char *ret1 = NULL;
-        struct tcp_flow tmp;
-        float weight = 0;
-
-        memset(&tmp, 0, sizeof(struct tcp_flow));
-
-        ret = recvfrom(skfd, &info, sizeof(struct _my_msg), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        // VLOG_INFO("xxxx\n");
-        memcpy(&tmp, info.data, sizeof(struct tcp_flow));
-        // VLOG_INFO("winsize is : %u %d  %u %u %d\n", tmp.ip_src, tmp.winsize, tmp.sourceaddr, tmp.destination, ret);
-        ret1 = malloc(sizeof(char) * 200);
-        set_cwnd(search_results->class, &tmp, ret1, 200);
-        VLOG_INFO("ret is %s\n", ret1);
-      }
-    }
-    // VLOG_INFO("ad\n");
-    else
-      VLOG_INFO("not found111\n");
-    destroy_item_list(fstates);
-  }
-
-  if (!ret)
-  {
-    perror("recv form kernel error\n");
-    close(skfd);
-    exit(-1);
-  }
-
-  search_results = bst_search(tnode, items_list, ITEM_AMOUNT);
-  if (search_results)
-  {
-    VLOG_INFO("found\n");
-  }
-  // VLOG_INFO("ad\n");
-  else
-    VLOG_INFO("not found\n");
-  // get_flows();
-
-  // VLOG_INFO("msg receive from kernel:%s\n", info.data);
-  close(skfd);
-
-  free((void *)nlh);
-  destroy_everything();
-  return 0;
-
-}
-
-void assign_string(struct item_value* d, char *s)
-{
-  int len = strlen(s);
-  d->name = (char *)malloc(sizeof(char) * len);
-  memset(d->name, 0, len);
-  memcpy(d->name, s, len);
-  // strcpy(d, s);
-  // VLOG_INFO("%s %d %02x\n", d->name, len, &d);
-}
-
-/**
- * clear structures
- */
-void destroy_everything()
-{
-  destroy_item_list(items_list);
-  destroy_parameters(parameters);
-  destroy_tree(tnode);
-  free_rawdata(node);
-  if(node)
-    node = NULL;
-  if(tnode)
-    tnode = NULL;
-  if(parameters)
-    parameters = NULL;
-  // if(items_list)
-  //  items_list = NULL;
-}
-int init_linger(char * inputtxt, char * item)
-{
-  // char inputtxt[] = "0,0,requeues_3,4583.405,0|0,1,allpackets_1,145.5,2|1,2,receive_time_5,406.741,2|2,3,active_time_4,925.101,2|3,4,leaf,0,2|3,5,drops_4,23788.1,2|5,6,drops_3,109624.0,2|6,7,receive_time_5,148.055,2|7,8,leaf,0,0|7,9,busy_time_4,750.129,2|9,10,leaf,0,0|9,11,leaf,0,2|6,12,leaf,0,0|5,13,leaf,0,2|2,14,leaf,0,0|1,15,packets_2,0.58,2|15,16,leaf,0,1|15,17,requeues_1,669.086,2|17,18,drops_1,7715.755,2|18,19,active_time_4,931.829,2|19,20,requeues_3,1174.415,2|20,21,backlogs_2,4843.15,2|21,22,allpackets_4,11.5,2|22,23,leaf,0,2|22,24,leaf,0,2|21,25,leaf,0,2|20,26,allpackets_1,319.0,2|26,27,leaf,0,2|26,28,leaf,0,2|19,29,noise_1,-89.5,2|29,30,retrans_3,50.5,2|30,31,leaf,0,2|30,32,allpackets_5,147.0,2|32,33,leaf,0,2|32,34,leaf,0,2|29,35,leaf,0,2|18,36,leaf,0,2|17,37,requeues_3,4473.6,2|37,38,active_time_5,922.379,2|38,39,leaf,0,2|38,40,leaf,0,2|37,41,leaf,0,2|0,42,busy_time_1,811.901,0|42,43,retrans_4,16.5,0|43,44,transmit_time_4,62.532,0|44,45,allpackets_1,168.5,0|45,46,busy_time_2,708.081,0|46,47,retrans_5,15.5,0|47,48,rbytes_2,165222.906,0|48,49,allpackets_4,216.0,0|49,50,busy_time_1,399.099,0|50,51,leaf,0,0|50,52,retrans_3,0.5,0|52,53,drops_1,13282.95,0|53,54,rbytes_4,200832.266,0|54,55,requeues_1,1269.48,0|55,56,leaf,0,0|55,57,rbytes_5,113537.703,1|57,58,transmit_time_1,53.347,0|58,59,leaf,0,1|58,60,leaf,0,0|57,61,leaf,0,1|54,62,leaf,0,0|53,63,leaf,0,0|52,64,packets_3,76.374,0|64,65,leaf,0,0|64,66,allpackets_5,154.5,0|66,67,retrans_3,9.5,0|67,68,packets_4,150.492,0|68,69,leaf,0,0|68,70,leaf,0,0|67,71,leaf,0,0|66,72,leaf,0,1|49,73,leaf,0,0|48,74,leaf,0,0|47,75,leaf,0,0|46,76,drops_5,95043.797,0|76,77,leaf,0,0|76,78,requeues_1,1332.805,0|78,79,transmit_time_1,31.125,0|79,80,leaf,0,0|79,81,allpackets_1,139.5,0|81,82,active_time_5,921.647,0|82,83,leaf,0,0|82,84,active_time_4,934.706,0|84,85,leaf,0,1|84,86,requeues_4,1519.65,0|86,87,leaf,0,0|86,88,leaf,0,0|81,89,allpackets_2,52.5,0|89,90,leaf,0,0|89,91,packets_2,102.88,0|91,92,packets_3,74.465,0|92,93,leaf,0,0|92,94,busy_time_1,796.27,0|94,95,busy_time_2,803.941,0|95,96,active_time_4,936.588,0|96,97,leaf,0,0|96,98,rbytes_1,181646.922,0|98,99,leaf,0,0|98,100,leaf,0,0|95,101,leaf,0,0|94,102,leaf,0,1|91,103,leaf,0,0|78,104,leaf,0,0|45,105,receive_time_5,269.211,0|105,106,retrans_5,15.5,0|106,107,rbytes_4,126370.078,0|107,108,leaf,0,1|107,109,drops_4,25934.4,0|109,110,leaf,0,0|109,111,packets_1,136.702,0|111,112,allpackets_3,155.5,0|112,113,active_time_3,933.032,0|113,114,leaf,0,1|113,115,leaf,0,0|112,116,leaf,0,0|111,117,rbytes_4,150856.359,0|117,118,leaf,0,0|117,119,allpackets_2,22.5,0|119,120,allpackets_2,15.5,1|120,121,leaf,0,0|120,122,leaf,0,1|119,123,allpackets_3,59.5,0|123,124,leaf,0,0|123,125,allpackets_4,214.5,0|125,126,transmit_time_3,23.069,0|126,127,leaf,0,0|126,128,active_time_4,936.779,1|128,129,leaf,0,0|128,130,transmit_time_4,29.219,1|130,131,allpackets_3,74.5,1|131,132,leaf,0,1|131,133,leaf,0,1|130,134,transmit_time_5,57.634,1|134,135,leaf,0,0|134,136,leaf,0,1|125,137,leaf,0,0|106,138,leaf,0,1|105,139,packets_1,144.73,0|139,140,allpackets_1,204.5,0|140,141,retrans_2,16.5,0|141,142,transmit_time_3,203.117,0|142,143,backlogs_3,4739.775,0|143,144,retrans_3,80.5,0|144,145,packets_3,326.613,0|145,146,packets_4,202.219,0|146,147,leaf,0,0|146,148,leaf,0,0|145,149,leaf,0,0|144,150,leaf,0,0|143,151,leaf,0,0|142,152,leaf,0,1|141,153,leaf,0,2|140,154,leaf,0,1|139,155,rbytes_3,519237.875,0|155,156,allpackets_1,191.5,0|156,157,requeues_1,1294.575,0|157,158,active_time_4,931.829,0|158,159,leaf,0,0|158,160,requeues_4,1631.26,0|160,161,receive_time_4,147.458,0|161,162,leaf,0,0|161,163,leaf,0,0|160,164,leaf,0,0|157,165,leaf,0,0|156,166,busy_time_3,801.711,0|166,167,packets_4,158.564,0|167,168,active_time_4,934.376,0|168,169,leaf,0,0|168,170,leaf,0,0|167,171,leaf,0,0|166,172,rbytes_4,177486.375,0|172,173,leaf,0,0|172,174,leaf,0,0|155,175,leaf,0,2|44,176,receive_time_1,110.609,0|176,177,leaf,0,0|176,178,busy_time_3,796.891,1|178,179,leaf,0,1|178,180,requeues_4,1546.595,0|180,181,leaf,0,0|180,182,leaf,0,1|43,183,allpackets_1,194.5,0|183,184,allpackets_5,283.5,0|184,185,packets_4,78.635,0|185,186,leaf,0,2|185,187,requeues_3,5247.93,1|187,188,leaf,0,1|187,189,active_time_4,937.092,0|189,190,leaf,0,0|189,191,leaf,0,1|184,192,leaf,0,0|183,193,leaf,0,2|42,194,requeues_3,5170.32,2|194,195,leaf,0,2|194,196,allpackets_5,122.5,2|196,197,leaf,0,2|196,198,receive_time_1,193.969,0|198,199,drops_5,106547.0,0|199,200,leaf,0,1|199,201,leaf,0,0|198,202,leaf,0,2";
-  char *str = NULL;
-
-  const char * split = "|";
-  char * p;
-  struct rawdata *nodeptr = NULL;
-
-  char *outer_ptr = NULL;
-  char *inner_ptr = NULL;
-
-  struct item_value *value[80];
-
-  int i = 0;
-  str = inputtxt;
-  p = strtok_r(str, split, &outer_ptr);
-  while (p != NULL)
-  {
-    char * tmp = NULL;
-    char * q;
-    struct rawdata *newnode = NULL;
-    int k = 0;
-    const char *split1 = ",";
-    // VLOG_INFO("%s\n", p);
-    tmp = p;
-    q = strtok_r(tmp, split1, &inner_ptr);
-    k = 0;
-    newnode = (struct rawdata *)malloc(sizeof(struct rawdata));
-    memset(newnode, 0, sizeof(struct rawdata));
-    while (q != NULL)
-    {
-      if (k == 0)
-        newnode->father = atoi(q);
-      if (k == 1)
-      {
-        newnode->itself = atoi(q);
-      }
-      if (k == 2)
-      {
-        int len = strlen(q);
-        newnode->name = (char *)malloc(sizeof(char) * len);
-        memset(newnode->name, 0, sizeof(char) * len);
-        strcpy(newnode->name , q);
-      }
-      if (k == 3)
-        newnode->value = atof(q);
-      if (k == 4)
-        newnode->class = atoi(q);
-      k = k + 1;
-      q = strtok_r(NULL, split1, &inner_ptr);
-    }
-    if (node == NULL)
-    {
-      node = newnode;
-      node->next = NULL;
-      nodeptr = node;
-    }
-    else
-    {
-      nodeptr->next = newnode;
-      nodeptr = newnode;
-      nodeptr->next = NULL;
-    }
-    p = strtok_r(NULL, split, &outer_ptr);
-  }
-  tnode = create_tree(node, NULL);
-  print_tree(tnode);
-  VLOG_INFO("the highth of tree is %d\n", TreeDepth(tnode));
-  parameters = get_parameters(node);
-  while (parameters[i])
-  {
-    VLOG_INFO("%d: %s\t", i, parameters[i]);
-    i = i + 1;
-  }
-  for (i = 0; i < ITEM_AMOUNT; i++)
-  {
-    // memset(items_list[i], 0, sizeof(struct item_value));
-    items_list[i].name = NULL;
-    items_list[i].value = -1000000.0;
-  }
-  create_items(items_list, item);
-  for (i = 0; i < ITEM_AMOUNT; i++)
-  {
-    if (items_list[i].name == NULL)
-      break;
-    VLOG_INFO("name %s value %f\n", items_list[i].name, items_list[i].value);
-    // i = i + 1;
-  }
-
-  return 0;
-}
-
-void free_rawdata(struct rawdata * head)
-{
-  struct rawdata * before = NULL;
-  while (head)
-  {
-    before = head;
-    head = head->next;
-    free(before->name);
-    before->name = NULL;
-    free(before);
-    before = NULL;
-  }
-}
-
-void print_rawdata(struct rawdata* raw)
-{
-  while (raw != NULL)
-  {
-    VLOG_INFO("%d\t%d\t%s\t%f\t%d\n", raw->father, raw->itself, raw->name, raw->value, raw->class);
-    raw = raw->next;
-  }
-}
-
-struct treenode * create_tree(struct rawdata *ptr, struct treenode * parent)
-{
-  struct treenode * newnode = NULL;
-  if (ptr != NULL)
-  {
-    newnode = (struct treenode *)malloc(sizeof(struct treenode));
-    memset(newnode, 0, sizeof(struct treenode));
-    newnode->name = (char *)malloc(sizeof(char) * strlen(ptr->name));
-    newnode->itself = ptr->itself;
-    strcpy(newnode->name, ptr->name);
-    newnode->value = ptr->value;
-    newnode->class = ptr->class;
-    newnode->lchild = NULL;
-    newnode->rchild = NULL;
-    newnode->parent = NULL;
-    if (strcmp(ptr->name, "leaf") != 0)
-    {
-      struct rawdata *ptrtmp = NULL;
-      ptrtmp = find_lchild(ptr->next, ptr->itself);
-      newnode->lchild = create_tree(ptrtmp, newnode);
-      ptrtmp = find_rchild(ptr->next, ptr->itself);
-      newnode->rchild = create_tree(ptrtmp, newnode);
-    }
-  }
-  return newnode;
-}
-
-void print_tree(struct treenode *raw)
-{
-  if (raw)
-  {
-    VLOG_INFO("%d\t%s\t%f\t%d\n", raw->itself, raw->name, raw->value, raw->class);
-    print_tree(raw->lchild);
-    print_tree(raw->rchild);
-  }
-}
-void destroy_tree(struct treenode *T)
-{
-  if (T)
-  {
-    destroy_tree(T->lchild);
-    destroy_tree(T->rchild);
-    free(T->name);
-    T->name = NULL;
-    free(T);
-    T = NULL;
-  }
-}
-struct rawdata * find_lchild(struct rawdata *ptr, int father)
-{
-  while (ptr)
-  {
-    if (ptr->father == father)
-    {
-      return ptr;
-    }
-    ptr = ptr->next;
-  }
-}
-struct rawdata * find_rchild(struct rawdata *ptr, int father)
-{
-  int rchild = 0;
-  while (ptr)
-  {
-    if (ptr->father == father)
-    {
-      if (rchild == 1)
-        return ptr;
-      rchild = rchild + 1;
-    }
-    ptr = ptr->next;
-  }
-}
-
-int TreeDepth(struct treenode *T)
-{
-  int rightdep = 0;
-  int leftdep = 0;
-
-  if (T == NULL)
-    return -1;
-
-  if (T->lchild != NULL)
-    leftdep = TreeDepth(T->lchild);
-  else
-    leftdep = -1;
-
-  if (T->rchild != NULL)
-    rightdep = TreeDepth(T->rchild);
-  else
-    rightdep = -1;
-
-  return (rightdep > leftdep) ? rightdep + 1 : leftdep + 1;
-}
-
-struct treenode* bst_search(struct treenode* node, struct item_value value[], int length)
-{
-  int found = 0;
-  struct treenode* node_pre = NULL;
-  node_pre = node;
-  while (node && (strcmp(node->name, "leaf") != 0))
-  {
-    int i = 0;
-    found = 0;
-    for (i = 0; i < length; i++)
-    {
-      if (strcmp(node->name, value[i].name) == 0)
-      {
-        found = 1;
-        break;
-      }
-      if (value[i].name == NULL)
-        break;
-    }
-    if (found = 0)
-      return NULL;
-    if (value[i].value <= node->value)
-    {
-      node_pre = node;
-      node = node->lchild;
-    }
-    else
-    {
-      node_pre = node;
-      node = node->rchild;
-    }
-  }
-  if (found)
-  {
-    VLOG_INFO("1 name %s value %f\n", node_pre->name, node_pre->value);
-    return node;
-  }
-  else
-  {
-    VLOG_INFO("2 name %s value %f\n", node_pre->name, node_pre->value);
-    return node_pre;
-  }
-}
-
-char ** get_parameters(struct rawdata *ptr)
-{
-  char **tmp;
-  int i = 0, found = 0, last = 0;
-  tmp = (char **)malloc(80 * sizeof(char *));
-  for (i = 0; i < 80; i++)
-  {
-    tmp[i] = NULL;
-  }
-  while (ptr)
-  {
-    char *str = NULL;
-    if (strcmp(ptr->name, "leaf") == 0)
-    {
-      ptr = ptr->next;
-      continue;
-    }
-    i = 0;
-    found = 0;
-    while (i < last)
-    {
-      if (strcmp(tmp[i], ptr->name) == 0)
-      {
-        found = 1;
-        break;
-      }
-      i = i + 1;
-    }
-    if (found == 1)
-    {
-      ptr = ptr->next;
-      continue;
-    }
-    else
-    {
-      tmp[last] = (char *)malloc(sizeof(char) * strlen(ptr->name));
-      memset(tmp[last], 0, sizeof(char) * strlen(ptr->name));
-      strcpy(tmp[last], ptr->name);
-      last = last + 1;
-    }
-
-    ptr = ptr->next;
-  }
-  return tmp;
-}
-void destroy_parameters(char *ptr[80])
-{
-  int i = 0;
-  for (i = 0; i < 80; i++)
-  {
-    free(ptr[i]);
-  }
-  free(ptr);
-}
-
-int create_items(struct item_value items_list[], char *buffer)
-{
-  int j, in = 0;
-  // char buffer[] = "requeues_3,5000;busy_time_1,809;allpackets_1,160;requeues_1,670;drops_1,3220;retrans_4,0;allpackets_3,0;retrans_5,1;retrans_3,0;receive_time_1,0;transmit_time_4,0;rbytes_3,0";
-  char *p[40];
-  int index = 0;
-  char *buf = buffer;
-  char *outer_ptr = NULL;
-  char *inner_ptr = NULL;
-  while ((p[in] = strtok_r(buf, ";", &outer_ptr)) != NULL)
-  {
-    buf = p[in];
-    while ((p[in] = strtok_r(buf, ",", &inner_ptr)) != NULL)
-    {
-      in++;
-      buf = NULL;
-    }
-    buf = NULL;
-  }
-  // VLOG_INFO("Here we have %d strings\n", in);
-  for (j = 0; j < in; j++)
-  {
-    if (j % 2 ==  0)
-    {
-      // VLOG_INFO("name: %s\n", p[j]);
-      items_list[index].name = (char *)malloc(sizeof(char) * strlen(p[j]));
-      memset(items_list[index].name, 0, sizeof(char) * strlen(p[j]));
-      strcpy(items_list[index].name, p[j]);
-    }
-    else
-    {
-      // VLOG_INFO("value: %s %f\n", p[j], atof(p[j]));
-      items_list[index].value = atof(p[j]);
-      if (index >= ITEM_AMOUNT)
-      {
-        VLOG_INFO("outrage\n");
-        exit(-1);
-      }
-
-      index = index + 1;
-    }
-  }
-}
-
-void destroy_item_list(struct item_value items_list[])
-{
-  int i = 0;
-  while (items_list[i].name)
-  {
-    free(items_list[i].name);
-    items_list[i].name = NULL;
-  }
-}

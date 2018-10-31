@@ -1,0 +1,138 @@
+/*
+    Simple udp client
+*/
+#include<stdio.h> //printf
+#include<string.h> //memset
+#include<stdlib.h> //exit(0);
+#include<arpa/inet.h>
+#include<sys/socket.h>
+#include<linux/types.h>
+#include <fcntl.h>
+#define SERVER "192.168.11.107"
+#define BUFLEN 512  //Max length of buffer
+#define PORT 12345   //The port on which to send data
+ 
+void die(char *s)
+{
+    perror(s);
+    exit(1);
+}
+ 
+ struct tcp_ss
+{
+    __u32 state;
+    char ip_src[18];
+    char ip_dst[18];
+    __be16 src_port;
+    __be16 dst_port;
+    __u32 cwnd;
+};
+struct cwnd_mss
+{
+  int cwnd;
+  int mss;
+};
+int main(void)
+{
+    int sock = 0;
+    while (1)
+    {
+    char ip_src[] = "192.168.11.107";
+    char ip_dst[] = "192.168.11.101";
+        // int 
+    struct sockaddr_in si_other;
+    struct sockaddr_in si_me;
+    int slen=sizeof(si_other);
+    char buf[1024];
+    int window = 0;
+    struct tcp_ss *tmp = NULL;
+    char buf1[8];
+    int len_ss;
+    ssize_t _s = 0;
+    int leng_int = sizeof(struct cwnd_mss);
+
+
+    if(sock < 0)
+    {
+    if ( (sock=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+    {
+        printf("1\n");
+        continue;
+    }
+    struct timeval timeout;
+    timeout.tv_sec = 3;
+    timeout.tv_usec = 10000;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
+      printf("setsockopt failed:");
+    }
+    }
+    memset((char *) &si_me, 0, sizeof(si_me));
+
+    si_me.sin_family = AF_INET;
+    si_me.sin_port = htons(12347);
+    si_me.sin_addr.s_addr = inet_addr("192.168.11.101");
+
+    //bind socket to port
+    if( bind(sock , (struct sockaddr*)&si_other, sizeof(si_me) ) == -1)
+    {
+      printf("2\n");
+     continue;
+    }
+
+    memset((char *) &si_other, 0, sizeof(si_other));
+    si_other.sin_family = AF_INET;
+    si_other.sin_addr.s_addr = INADDR_ANY;
+    si_other.sin_port = htons(12345);
+    // printf("%s %s\n", ip_src, ip_dst);
+    if (inet_aton(ip_src , &si_other.sin_addr) == 0) 
+    {
+        printf("3\n");
+        continue;
+    }
+
+    len_ss = sizeof(struct tcp_ss) * sizeof(char);
+    tmp = (struct tcp_ss *)malloc(len_ss);
+    memset(tmp, 0, len_ss);
+
+    strcpy(tmp->ip_src, ip_src);
+    strcpy(tmp->ip_dst, ip_dst);
+    tmp->src_port = 42388;
+    tmp->dst_port = 12307;
+    memcpy(buf, tmp, len_ss);
+    // printf("4 %s %s %d %d\n", tmp->ip_src, tmp->ip_dst, tmp->src_port, tmp->dst_port);
+    if (sendto(sock, buf, len_ss , 0 , (struct sockaddr *) &si_other, slen)==-1)
+    {
+        printf("4\n");
+        sleep(1);
+      continue;
+    }
+    free(tmp);
+    tmp = NULL;
+    _s = -1;
+    static fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(sock, &fds);
+    static struct timeval tv = {0, 10000};
+    int readynum = select(sock + 1, &fds, NULL, NULL, &tv);
+    if(readynum > 0)
+    {
+    memset(buf1, 0, 8);
+    _s = recvfrom(sock, buf1, 8, 0, (struct sockaddr *) &si_other, (socklen_t*)&slen);
+    printf("_s is %d", (int)_s);
+    if (_s > 0)
+    {
+      struct cwnd_mss tmp;
+      printf("%s", buf1);
+      memset(&tmp, 0, leng_int);
+      memcpy(&tmp, buf1, leng_int);
+      printf("%d %d", tmp.cwnd, tmp.mss);
+      window = tmp.cwnd * tmp.mss;
+    }
+    }
+    printf("window is %d\n", window);
+
+    close(sock);
+    sleep(1);
+    }
+    return 0;
+}
