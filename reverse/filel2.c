@@ -3,16 +3,31 @@
  */
 #include <stdio.h>
 #include <errno.h>
- 
+#include <unistd.h>
+#include <stdlib.h>
+#include <linux/types.h>
+#include <string.h>
 long count_characters(FILE *);
- 
+
+static void get_systime_linger(__be32 *t, __be32 *v)
+{
+  struct timeval tv;
+  memset(&tv, 0, sizeof(struct timeval));
+  gettimeofday(&tv, NULL);
+  *t = tv.tv_sec;
+  *v = tv.tv_usec;
+}
+
 void main(int argc, char * argv[])
 {
     int i;
     long cnt;
     char ch, ch1;
     FILE *fp1, *fp2;
- 
+    __be32 sec1, sec2;
+    __be32 usec1, usec2;
+    __be32 duration = 0;
+    get_systime_linger(&sec1, &usec1);
     if (fp1 = fopen(argv[1], "r"))    
     {
         printf("The FILE has been opened...\n");
@@ -36,6 +51,9 @@ void main(int argc, char * argv[])
     }
     fclose(fp1);
     fclose(fp2);
+    get_systime_linger(&sec2, &usec2);
+    duration = (sec2 - sec1) * 1000000 + (usec2 - usec1);
+    printf("duration is %d\n", (int)duration);
 }
 // count the total number of characters in the file that *f points to
 long count_characters(FILE *f) 

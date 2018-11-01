@@ -17,13 +17,11 @@ Reading strings from a file in reverse order
 /* Global variables */
 FILE *pInFile = NULL;                   /* File pointer to input file     */
 FILE *pOutFile = NULL;                  /* File pointer  to output file   */
-char *infilename = "C:\\myfile.txt";    /* Name of the file to be read    */
-char *outfilename = "C:\\outfile.txt";  /* Name of the file to be written */
 char *buffer = NULL;
 size_t buffer_size = BUFFER_SIZE;
 
 
-void main()
+void main(int argc, char * argv[])
 {
   size_t str_length = 0;
   int str_count = 0;
@@ -32,9 +30,9 @@ void main()
 
   buffer = (char*)malloc(buffer_size);            /* Create initial buffer */
 
-  if((pInFile = fopen(infilename, "r")) == NULL)  /* Open the input file   */
+  if((pInFile = fopen(argv[1], "r")) == NULL)  /* Open the input file   */
   {
-    printf("Error opening %s for reading. Program terminated.", infilename);
+    printf("Error opening %s for reading. Program terminated.", argv[1]);
     abort();
   }
 
@@ -69,9 +67,9 @@ void main()
  }
 
   /* Open the output file */
-  if((pOutFile = fopen(outfilename, "w")) == NULL)
+  if((pOutFile = fopen(argv[2], "w")) == NULL)
   {
-    printf("Error opening %s for reading. Program terminated.", outfilename);
+    printf("Error opening %s for reading. Program terminated.", argv[2]);
     abort();
   }
 
@@ -90,9 +88,9 @@ void main()
   printf("\nNew file write complete\n");
 
   /* List contents of output file */
-  if((pOutFile = fopen(outfilename, "r")) == NULL)        /* Open the new file to read it */
+  if((pOutFile = fopen(argv[2], "r")) == NULL)        /* Open the new file to read it */
   {
-    printf("Error opening %s for reading. Program terminated.", outfilename);
+    printf("Error opening %s for reading. Program terminated.", argv[2]);
     abort();
   }
   printf("\nThe strings in the new file are:");
