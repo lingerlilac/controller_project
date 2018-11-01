@@ -1,8 +1,8 @@
-objects =  6666.o
+objects =  receive.o
 
 helloworld: $(objects)
-	gcc -g -Wall -o 6666 $(objects)  -lpthread -L/usr/lib/mysql -lmysqlclient
-6666.o: 6666.c hash_lin.h
-	gcc -g -Wall -c 6666.c  -lpthread 
+	gcc -g -Wall -o receive $(objects)  -lpthread -L/usr/lib/mysql -lmysqlclient
+receive.o: receive.c hash_lin.h
+	gcc -g -Wall -c receive.c  -lpthread 
 clean:
-	rm -f *.o 6666
+	rm -f *.o receive

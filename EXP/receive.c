@@ -39,11 +39,8 @@ char buffer_pool[POOL_SIZE];
  */
 int tail = 0;
 int head = 0;
-int count1 = 0;
-int count2 = 0;
-// int packet_count = 0;
-// int packet_count1 = 0;
 
+int write_count = 0;
 /**
  * used to compute retrans, record seq of each dataflow
  */
@@ -114,7 +111,7 @@ void f_print_string (char *str, int length);
 int strcmp_linger (unsigned char *s, unsigned char *t);
 void *g_mes_tn_process (void *arg);
 void f_write_string (char *str, int length);
-
+void get_file_name(char *buf, char *appendix);
 void destroy (void);
 void start_program (void);
 void destroy_everything (void);
@@ -251,7 +248,6 @@ receive (void *arg)
 			// printf("length is %d\n", len);
 			// f_print_string(message, 1024);
 			// process(message, len);
-			// packet_count += 1;
 			pthread_mutex_lock (&mutex_pool);
 			memcpy (buffer_pool + tail, message, SEND_SIZE);
 			tail = tail + SEND_SIZE;
@@ -300,7 +296,6 @@ receive1 (void *arg)
 			// printf("length is %d\n", len);
 			// f_print_string(message, 1024);
 			// process(message, len);
-			// packet_count += 1;
 			pthread_mutex_lock (&mutex_pool);
 			memcpy (buffer_pool + tail, message, SEND_SIZE);
 			tail = tail + SEND_SIZE;
@@ -391,8 +386,6 @@ process (char *buffer, int length)
 		// if((value == 5) || (value == 8))
 		// printf("value is %u %02x\n", value, value);
 		value_enum = (enum data_category) value;
-		// if((packet_count % 1000) == 0)
-		// 	printf("packet received is %d %d\n",packet_count, packet_count1);
 		if (count_winsize % 10000 == 0)
 			printf("%d %d %d %d %d\n", count_winsize, count_iw, count_survey, count_queue, count_retrans);
 		switch (value_enum)
@@ -421,7 +414,6 @@ process (char *buffer, int length)
 			offset += sizeof (struct data_beacon) + 6;
 			break;
 		case SURVEY:
-			// packet_count1 += 1;
 			decode_survey (buffer + offset);
 			offset += sizeof (struct data_survey) + 6;
 			count_survey += 1;
@@ -1982,6 +1974,21 @@ void *format_data(void *arg)
 						        q_keep_3.drops, q_keep_3.requeues, q_keep_3.overlimits,
 						        q_keep_f.bytes, q_keep_f.packets, q_keep_f.qlen, q_keep_f.backlog,
 						        q_keep_f.drops, q_keep_f.requeues, q_keep_f.overlimits);
+						write_count += 1;
+						if(write_count > 50000)
+						{
+							char retrs_fname[100];
+							fclose(fretrans);
+							fretrans = NULL;
+							get_file_name(retrs_fname, "_retrans.txt");
+							fretrans = fopen(retrs_fname, "ab");
+							if (fretrans == NULL)
+							{
+								printf("retrans file openfailed\n");
+								exit(-1);
+							}							
+							write_count = 0;
+						}
 					}
 				}
 			}
@@ -2112,6 +2119,21 @@ void *format_data(void *arg)
 				        q_keep_3.drops, q_keep_3.requeues, q_keep_3.overlimits,
 				        q_keep_f.bytes, q_keep_f.packets, q_keep_f.qlen, q_keep_f.backlog,
 				        q_keep_f.drops, q_keep_f.requeues, q_keep_f.overlimits);
+				write_count += 1;
+				if(write_count > 50000)
+				{
+					char retrs_fname[100];
+					fclose(fretrans);
+					fretrans = NULL;
+					get_file_name(retrs_fname, "_retrans.txt");
+					fretrans = fopen(retrs_fname, "ab");
+					if (fretrans == NULL)
+					{
+						printf("retrans file openfailed\n");
+						exit(-1);
+					}							
+					write_count = 0;
+				}
 			}
 		}
 		// time_current = getcurrenttime();
@@ -2128,6 +2150,7 @@ start_threads (void)
 	int err = 0;
 
 	char buf[128];
+	char retrs_fname[100];
 	char *ptr = NULL, *ptr1 = NULL;
 	char appendix[] 	= "_winsize.txt";
 	char appendix1[] 	= "_other.txt";
@@ -2181,7 +2204,8 @@ start_threads (void)
 		puts ("other opened failed");
 		exit(-1);
 	}
-	fretrans = fopen("retrans.txt", "ab");
+	get_file_name(retrs_fname, "_retrans.txt");
+	fretrans = fopen(retrs_fname, "ab");
 	if (fretrans == NULL)
 	{
 		printf("retrans file openfailed\n");
@@ -2270,7 +2294,8 @@ destroy_everything (void)
 	pthread_exit (0);
 	fclose (fp);
 	fclose (fp_winsize);
-	fclose(fretrans);
+	if(fretrans != NULL)
+		fclose(fretrans);
 	hash_table_release ();
 
 	// for (i = 0; i < BUFFER_STORE; i++)
@@ -2310,6 +2335,38 @@ destroy (void)
 	destroy_everything ();
 }
 
+void get_file_name(char *buf, char *appendix)
+{
+	char *ptr = NULL;
+	FILE *pp;
+
+	if ( (pp = popen("date", "r")) == NULL )
+	{
+		printf("popen() error!/n");
+		exit(1);
+	}
+
+	while (fgets(buf, 100, pp))
+	{
+		// printf("%s", buf);
+	}
+	ptr = buf;
+	while (*ptr != '\0')
+	{
+		// printf("%s ", ptr);
+		if ((*ptr == ' ') || (*ptr == ':'))
+			*ptr = '_';
+		ptr += 1;
+	}
+	ptr -= 1;
+	if ((ptr + strlen(appendix)) < (buf + 128))
+	{
+		memcpy(ptr, appendix, strlen(appendix));
+	}
+	ptr = ptr + strlen(appendix);
+	*ptr = '\0';
+	printf("%s\n", buf);
+}
 int
 main ()
 {
@@ -2424,12 +2481,7 @@ f_print_string (char *str, int length)
 	char buf[100];
 	memset (buf, 0, 100);
 	i = 0;
-	count1 += 1;
 	fprintf (fp, "=======================================================\n");
-	if ((count1 % 1000) == 0)
-	{
-		printf ("fprintf is %d\n", count1);
-	}
 	while (i < length)
 	{
 		// printf("%02x ", (unsigned char)*(str + i));
@@ -2474,16 +2526,6 @@ f_write_string (char *str, int length)
 	//         // printf("111 %s\n", buf);
 	//         memset(buf, 0, 100);
 	//         k = 0;
-	//     }
-	// }
-	count2 += 1;
-	// if((count2 % 1000) == 0)
-	// {
-	//     // printf("fwrite is %d\n", count2);
-	//     if(138000 == count2)
-	//     {
-	//         fclose(fp);
-	//         exit(-1);
 	//     }
 	// }
 	fwrite (str, sizeof (char), length, fp_winsize);
