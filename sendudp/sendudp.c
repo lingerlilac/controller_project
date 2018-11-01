@@ -68,13 +68,40 @@ struct iw_record
 	__u32 rates;
 	__u16 computed;
 };
+
+// enum sta_l
+// {
+//     drop_count, neibours, stations, time_busy, time_ext_busy,
+//     time_rx, time_tx, time_scan, noise, q3bytes,
+//     q3packets, q3qlen, q3backlog,
+//     q3drops, q3requeues, q3overlimits,
+//     qfbytes, qfpackets, qfqlen, qfbacklog,
+//     qfdrops, qfrequeues, qfoverlimits
+// };
 /**
  * Used to get current ap state.
  */
 struct apstates
 {
+
+
+
+
     __u32 sec;
     __u32 usec;
+    __u32 q3packets;
+    __u32 q3qlen;
+    __u32 q3backlog;
+    __u32 q3drops;
+    __u32 q3requeues;
+    __u32 q3overlimits;  
+    __u32 drop_count;
+    __u32 qfpackets;
+    __u32 qfqlen;
+    __u32 qfbacklog;
+    __u32 qfdrops;
+    __u32 qfrequeues;
+    __u32 qfoverlimits; 
     __u32 drop_count;
     __u64 time;
     __u64 time_busy;
@@ -82,16 +109,12 @@ struct apstates
     __u64 time_rx;
     __u64 time_tx;
     __u64 time_scan;
+    __u64 q3bytes;
+    __u64 qfbytes;
     __s8 noise;
     __u8 stations;
-    __u32 packets;
-    __u64 bytes;
-    __u32 qlen;
-    __u32 backlog;
-    __u32 drops;
-    __u32 requeues;
-    __u32 overlimits;
-    __u16 pad;   
+    __u16 pad;
+    __u32 pad1;
 };
 /*
 * dp_packet is a structure used to record data packet that dropped in mac80211 or
@@ -493,20 +516,22 @@ static void recv_cb(struct sk_buff *skb)
 	    		apstat.time_tx = (times * (tmp2.time_tx - tmp1.time_tx)) / dur_sur;
 	    		apstat.time_scan = (times * (tmp2.time_scan - tmp1.time_scan)) /dur_sur;
 	    		apstat.noise = tmp2.noise;
-	    		apstat.packets = (times * (tmp2.packets - tmp1.packets)) / duration;
+	    		
+                apstat.packets = (times * (tmp2.packets - tmp1.packets)) / duration;
 	    		apstat.bytes = (times * (tmp2.bytes - tmp1.bytes)) / duration;
 	    		apstat.qlen = maxqlen;
 	    		apstat.backlog = maxbacklog;
 	    		apstat.drops = (times * (tmp2.drops - tmp1.drops)) / duration;
 	    		apstat.requeues = (times * (tmp2.requeues - tmp1.requeues)) / duration;
 	    		apstat.overlimits = (times * (tmp2.overlimits - tmp1.overlimits)) / duration;
-	    		apstat.sec = tmp2.sec;
+	    		
+                apstat.sec = tmp2.sec;
 	    		apstat.usec = tmp2.usec;
 	    		apstat.stations = tmp2.stations;
 	    		buf = (char *)kmalloc(length, GFP_KERNEL);
 	    		memset(buf, 0, length);
-	    		apstat.sec = 1000;
-	    		apstat.usec = 100;
+	    		// apstat.sec = 1000;
+	    		// apstat.usec = 100;
 	    		memcpy(buf, &apstat, length);
 	    		// printk(KERN_DEBUG "W %u %u %u %llu %llu %llu %lu\n", apstat.sec, apstat.usec, apstat.drop_count, apstat.time, apstat.time_busy, apstat.time_ext_busy, sizeof(struct apstates));
 
@@ -993,66 +1018,6 @@ void compare_and_iwlist(struct data_iw *ptr, struct data_survey *sur)
 			last_usec_iw = t.iw.usec;
 		}
 		
-		// if((count_iw % 50) == 0)
-		// {
-		// 	char mac_addr[18];
-		// 	i = 0;
-		// 	// printk(KERN_DEBUG "heree");
-		// 	mac_tranADDR_toString_r(tmp->station, mac_addr, 18);
-		// 	for(i = 0; i < 10; i++)
-		// 	{
-		// 		struct iw_record *xtmp = NULL;
-		// 		xtmp = iw_rec + i;
-		// 		if(xtmp->sec == 0)
-		// 		{
-		// 			memcpy(xtmp->station, tmp->station, 6);
-		// 			xtmp->sec = tmp->sec;
-		// 			xtmp->usec = tmp->usec;
-		// 			xtmp->bytes = tmp->tx_bytes;
-		// 			xtmp->computed = 2;
-		// 			// printk(KERN_DEBUG "heree %u %d %u\n", tmp->sec, i, iw_rec[i].sec);
-		// 			break;
-		// 		}
-		// 		else if ((strcmp_linger(xtmp->station, tmp->station) == 0))
-		// 		{	
-		// 			__u32 duration = 0;
-		// 			if(tmp->usec >= xtmp->usec)
-		// 			{
-		// 				__u32 rate = 0;
-		// 				duration = tmp->usec - xtmp->usec;
-		// 				duration = duration / 1000;
-		// 				duration = duration + (tmp->sec - xtmp->sec) * 1000;
-		// 				rate = 1000 * (tmp->tx_bytes - xtmp->bytes) / duration;
-		// 				xtmp->rates = rate;
-		// 				xtmp->computed = 1;
-		// 				xtmp->sec = tmp->sec;
-		// 				xtmp->usec = tmp->usec;
-		// 				xtmp->bytes = tmp->tx_bytes;
-		// 			}
-		// 			else
-		// 			{
-		// 				__u32 rate = 0;
-		// 				duration = xtmp->usec - tmp->sec;
-		// 				duration = duration / 1000;
-		// 				duration = (tmp->sec - xtmp->sec) * 1000 - duration;
-		// 				rate = 1000 * (tmp->tx_bytes - xtmp->bytes) / duration;
-		// 				xtmp->rates = rate;	
-		// 				xtmp->computed = 1;	
-		// 				xtmp->sec = tmp->sec;
-		// 				xtmp->usec = tmp->usec;
-		// 				xtmp->bytes = tmp->tx_bytes;				
-		// 			}
-		// 			// printk(KERN_DEBUG "heree %s %u\n", mac_addr, xtmp->rates);
-		// 			if(xtmp->rates >= maxrateflow.rates)
-		// 			{
-		// 				maxrateflow = *xtmp;
-		// 			}
-		// 			// printk(KERN_DEBUG "here2");
-		// 			break;
-		// 		}
-		// 	}
-
-		// }
 		tmp = tmp->next;
 	}
 	i = 0;
@@ -1073,77 +1038,15 @@ void compare_and_iwlist(struct data_iw *ptr, struct data_survey *sur)
 	count_iw = count_iw % 500000;
 	tmp_aps->stations = count;
 }
-/**
- * Check whether to transmit current queue information got.
- * @Linger
- * @DateTime 2018-05-06T02:32:44-0500
- * @param    ptr                      Address of queue got from sch_fq_codel.c
- */
-// void compare_and_queue(struct data_queue *ptr)
-// {
-// 	int i = 0;
-// 	int condition = 0;
-// 	struct apstates *tmp;
-// 	tmp = apstates_global + aps_head;
-	
-// 	for(i = 0; i < 6; i++)
-// 	{
-// 		// if(i < 5)
-// 		// {
-// 			tmp->packets += (ptr + i)->packets;
-// 			tmp->bytes += (ptr + i)->bytes;
-// 			tmp->qlen += (ptr + i)->qlen;
-// 			tmp->backlog += (ptr + i)->backlog;
-// 			tmp->drops += (ptr + i)->drops;
-// 			tmp->requeues += (ptr + i)->requeues;
-// 			tmp->overlimits += (ptr + i)->overlimits;
-// 		// }
-// 		condition = (queue_last[i].queue_id 	== (ptr + i)->queue_id) 	+
-// 		            (queue_last[i].qlen 		== (ptr + i)->qlen) 		+
-// 		            (queue_last[i].backlog 		== (ptr + i)->backlog) 	+
-// 		            (queue_last[i].drops 		== (ptr + i)->drops) 		+
-// 		            (queue_last[i].requeues 	== (ptr + i)->requeues) 	+
-// 		            (queue_last[i].overlimits  	== (ptr + i)->overlimits);
 
-// 		if (condition != 6)
-// 		{
-// 			struct dq_t t;
-// 			memset(&t, 0, sizeof(struct dq_t));
-// 			t.category = QUEUE;
-// 			t.queue.queue_id 	= (ptr + i)->queue_id;
-// 			t.queue.bytes 		= (ptr + i)->bytes;
-// 			t.queue.packets 	= (ptr + i)->packets;
-// 			t.queue.qlen 		= (ptr + i)->qlen;
-// 			t.queue.backlog 	= (ptr + i)->backlog;
-// 			t.queue.drops 		= (ptr + i)->drops;
-// 			t.queue.requeues 	= (ptr + i)->requeues;
-// 			t.queue.overlimits 	= (ptr + i)->overlimits;
-// 			t.queue.sec 		= (ptr + i)->sec;
-// 			t.queue.usec		= (ptr + i)->usec;
-// 			memcpy(&(t.mac), mac_global, 6);
-// 			// if(t.queue.sec > last_sec_queue)
-// 			// {
-// 			// 	write_2_public_buffer(&t, sizeof(struct dq_t));
-// 			// 	last_sec_queue = t.queue.sec;
-// 			// 	last_usec_queue = t.queue.usec;
-// 			// }
-// 			// else if ((t.queue.sec == last_sec_queue) && (t.queue.usec > last_usec_queue))
-// 			// {
-// 			// 	write_2_public_buffer(&t, sizeof(struct dq_t));
-// 			// 	last_usec_queue = t.queue.usec;
-// 			// }
-// 			write_2_public_buffer(&t, sizeof(struct dq_t));
-// 			// *queue_last = *ptr;
-// 		}
-// 		queue_last[i] = *(ptr + i);
-// 	}
-// }
 void compare_and_queue(void)
 {
 	int i = 0;
 	struct data_queue *tmp = NULL, *pre = NULL;
 	for(i = 0; i < 6; i++)
 	{
+        struct apstates *xx;
+        xx = apstates_global + aps_head;
 		struct dq_t t;
 		tmp = queue_global + i;
 		pre = queue_previous + i;
@@ -1151,7 +1054,6 @@ void compare_and_queue(void)
 		if(tmp->bytes == pre->bytes)
 			continue;
 		
-		// printk(KERN_DEBUG "%u %llu %u %llu %u\n", tmp->queue_id, tmp->bytes, tmp->qlen, tmp->backlog,tmp->drops);
 		memset(&t, 0, sizeof(struct dq_t));
 		memcpy(&(t.mac), mac_global, 6);
 		t.category = QUEUE;
@@ -1166,9 +1068,63 @@ void compare_and_queue(void)
 		t.queue.sec 		= tmp->sec;
 		t.queue.usec		= tmp->usec;
 		*pre = *tmp;
+
+        if(tmp->queue_id == (__u32)4294967295)
+        {
+            xx->qfpackets = tmp->packets;
+            xx->qfbytes = tmp->bytes;
+            xx->qfqlen = tmp->qlen;
+            xx->qfbacklog = tmp->backlog;
+            xx->qfdrops = tmp->drops;
+            xx->qfrequeues = tmp->requeues;
+            xx->qfoverlimits = tmp->overlimits;
+        }
+        else if(tmp->queue_id == 3)
+        {
+            xx->q3packets = tmp->packets;
+            xx->q3bytes = tmp->bytes;
+            xx->q3qlen = tmp->qlen;
+            xx->q3backlog = tmp->backlog;
+            xx->q3drops = tmp->drops;
+            xx->q3requeues = tmp->requeues;
+            xx->q3overlimits = tmp->overlimits;
+        }
 		write_2_public_buffer(&t, sizeof(struct dq_t));
 	}
 }
+struct apstates
+{
+    __u32 sec;
+    __u32 usec;
+    __u32 q3packets;
+    __u32 q3qlen;
+    __u32 q3backlog;
+    __u32 q3drops;
+    __u32 q3requeues;
+    __u32 q3overlimits;  
+    __u32 drop_count;
+    __u32 qfpackets;
+    __u32 qfqlen;
+    __u32 qfbacklog;
+    __u32 qfdrops;
+    __u32 qfrequeues;
+    __u32 qfoverlimits; 
+    __u32 drop_count;
+
+    __u64 time;
+    __u64 time_busy;
+    __u64 time_ext_busy;
+    __u64 time_rx;
+    __u64 time_tx;
+    __u64 time_scan;
+    __u64 q3bytes;
+    __u64 qfbytes;
+
+    __s8 noise;
+    __u8 stations;
+    __u16 pad;
+    __u32 pad1;
+};
 /**
  * Simillar as compare_and_iwlist
  * @Linger
