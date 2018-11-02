@@ -9,8 +9,9 @@
 #include<linux/types.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <unistd.h>
 #define SERVER "192.168.11.101"
-#define BUFLEN 512  //Max length of buffer
+#define BUFLEN 48  //Max length of buffer
 #define PORT 12345   //The port on which to send data
  
 
@@ -38,7 +39,7 @@ void die(char *s)
 void run_linger(struct tcp_ss *str)
 {
     struct sockaddr_in si_other;
-    int s, i, slen=sizeof(si_other);
+    int s, slen=sizeof(si_other);
     char buf[BUFLEN];
     char message[BUFLEN];
  
@@ -79,7 +80,7 @@ void run_linger(struct tcp_ss *str)
     //clear the buffer by filling null, it might have previously received data
     memset(buf,'\0', BUFLEN);
     //try to receive some data, this is a blocking call
-    if (recvfrom(s, buf, length, 0, (struct sockaddr *) &si_other, &slen) == -1)
+    if (recvfrom(s, buf, length, 0, (struct sockaddr *) &si_other, (socklen_t*)&slen) == -1)
     {
        printf("%d\n", (int)errno);
     }

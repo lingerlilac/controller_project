@@ -7,8 +7,10 @@
 #include<arpa/inet.h>
 #include<sys/socket.h>
 #include <linux/types.h>
-#define BUFLEN 1024  //Max length of buffer
-#define PORT 12345   //The port on which to listen for incoming data
+#include<errno.h>
+#include <unistd.h>
+#define BUFLEN 512  //Max length of buffer
+#define PORT 8888   //The port on which to listen for incoming data
 #define _LINE_LENGTH 300
 
 struct tcp_ss
@@ -56,7 +58,7 @@ int main(void)
 {
     struct sockaddr_in si_me, si_other;
      
-    int s, i, slen = sizeof(si_other) , _s;
+    int s, slen = sizeof(si_other) , _s;
     char buf[BUFLEN];
      
     //create a UDP socket
@@ -85,7 +87,7 @@ int main(void)
         fflush(stdout);
          
         //try to receive some data, this is a blocking call
-        _s = recvfrom(s, buf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen);
+        _s = recvfrom(s, buf, BUFLEN, 0, (struct sockaddr *) &si_other, (socklen_t*)&slen);
         if(_s > 0)
         {
             struct tcp_ss *tmp;
@@ -93,8 +95,7 @@ int main(void)
             FILE *file;
             char line[_LINE_LENGTH];
             char *ret = NULL;
-            int ip_src_found = 0;
-            int ip_dst_found = 0;
+
 
             len_ss = sizeof(struct tcp_ss) * sizeof(char);
             tmp = (struct tcp_ss *)malloc(len_ss);
@@ -218,7 +219,7 @@ int main(void)
                 }
                 if(found_cwnd == 1)
                 {
-                    char buf[1024];
+                    char buf[BUFLEN];
                     struct cwnd_mss tmp;
                     tmp.cwnd = cwnd;
                     tmp.mss = mss;
@@ -228,7 +229,7 @@ int main(void)
                 }
                 else
                 {
-                    char buf[1024];
+                    char buf[BUFLEN];
                     struct cwnd_mss tmp;
                     tmp.cwnd = -1;
                     tmp.mss = -1;
