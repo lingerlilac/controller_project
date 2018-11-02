@@ -135,33 +135,45 @@ struct tcp_flow
   __u64 packets;
 };
 
-struct apstates
-{
-    __u32 sec;
-    __u32 usec;
-    __u32 drop_count;
-    __u64 time;
-    __u64 time_busy;
-    __u64 time_ext_busy;
-    __u64 time_rx;
-    __u64 time_tx;
-    __u64 time_scan;
-    __s8 noise;
-    __u8 stations;
-    __u32 packets;
-    __u64 bytes;
-    __u32 qlen;
-    __u32 backlog;
-    __u32 drops;
-    __u32 requeues;
-    __u32 overlimits;
-    __u16 pad;   
+struct apstates {
+  __u32 sec;
+  __u32 usec;
+  __u32 q3packets;
+  __u32 q3qlen;
+  __u32 q3backlog;
+  __u32 q3drops;
+  __u32 q3requeues;
+  __u32 q3overlimits;
+  __u32 qfpackets;
+  __u32 qfqlen;
+  __u32 qfbacklog;
+  __u32 qfdrops;
+  __u32 qfrequeues;
+  __u32 qfoverlimits;
+  __u32 drop_count;
+  __s8 noise;
+  __u8 stations;
+  __u16 pad;
+  __u64 time;
+  __u64 time_busy;
+  __u64 time_ext_busy;
+  __u64 time_rx;
+  __u64 time_tx;
+  __u64 time_scan;
+  __u64 q3bytes;
+  __u64 qfbytes;
 };
 
 enum sta_l
 {
-  drop_count, time_busy, time_ext_busy, time_rx, time_tx, time_scan, noise, packets, bytes, qlen, backlog, drops, requeues, overlimits
+    drop_count, stations, time_busy, time_ext_busy,
+    time_rx, time_tx, time_scan, noise, q3bytes,
+    q3packets, q3qlen, q3backlog,
+    q3drops, q3requeues, q3overlimits,
+    qfbytes, qfpackets, qfqlen, qfbacklog,
+    qfdrops, qfrequeues, qfoverlimits
 };
+
 struct _my_msg
 {
   /**
@@ -457,9 +469,10 @@ int main_linger(void)
   else
   {
     float times = 0.000001;
-    struct item_value fstates[14];
+    struct item_value fstates[22];
     int i = 0;
-    // char len[14][20] = {"drop_count", "time_busy", "time_ext_busy", "time_rx", "time_tx", "time_scan", "noise", "packets", "bytes", "qlen", "backlog", "drops", "requeues", "overlimits"};
+    // char len[14][20] = {"drop_count", "time_busy", "time_ext_busy", "time_rx", "time_tx", 
+    // "time_scan", "noise", "packets", "bytes", "qlen", "backlog", "drops", "requeues", "overlimits"};
     // memset(&fstates, 0, sizeof(struct apstates_float));
     memset(&apst, 0, sizeof(struct apstates));
     memcpy(&apst, info.data, sizeof(struct apstates));
@@ -468,9 +481,13 @@ int main_linger(void)
     // reversebytes_uint32t(&(apst.usec));
     // reversebytes_uint64t(&(apst.time_busy));
     // reversebytes_uint64t(&(apst.time_ext_busy));
-    // VLOG_INFO("W %u %u %u %llu %llu %llu %d\n", apst.sec, apst.usec, apst.drop_count, apst.time, apst.time_busy, apst.time_ext_busy, sizeof(struct apstates));
+    // VLOG_INFO("W %u %u %u %llu %llu %llu %d\n", apst.sec, apst.usec, apst.drop_count, 
+    // apst.time, apst.time_busy, apst.time_ext_busy, sizeof(struct apstates));
     fstates[drop_count].value = ((float)apst.drop_count) * times;
     assign_string(&fstates[drop_count], "drop_count");
+    fstates[stations].value = ((float)apst.stations);
+    assign_string(&fstates[stations], "stations");
+    // VLOG_INFO(" %s %f %d\n", fstates[stations].name, fstates[stations].value, stations);
     fstates[time_busy].value = ((float)apst.time_busy) * times;
     assign_string(&fstates[time_busy] , "time_busy");
     fstates[time_ext_busy].value = ((float)apst.time_ext_busy) * times;
@@ -483,29 +500,45 @@ int main_linger(void)
     assign_string(&fstates[time_scan] , "time_scan");
     fstates[noise].value = (float)apst.noise;
     assign_string(&fstates[noise] , "noise");
-    fstates[packets].value = ((float)apst.packets) * times;
-    assign_string(&fstates[packets] , "packets");
-    fstates[bytes].value = ((float)apst.bytes * times);
-    assign_string(&fstates[bytes] , "bytes");
-    fstates[qlen].value = ((float)apst.qlen);
-    assign_string(&fstates[qlen] , "qlen");
-    fstates[backlog].value = ((float)apst.backlog);
-    assign_string(&fstates[backlog] , "backlog");
-    fstates[drops].value = ((float)apst.drops);
-    assign_string(&fstates[drops] , "drops");
-    fstates[requeues].value = ((float)requeues * times);
-    assign_string(&fstates[requeues] , "requeues");
-    fstates[overlimits].value = ((float)overlimits * times);
-    assign_string(&fstates[overlimits] , "overlimits");
 
-    // for (i = 0; i < 14; i++)
+    fstates[q3packets].value = ((float)apst.q3packets) * times;
+    assign_string(&fstates[q3packets] , "q3packets");
+    fstates[q3bytes].value = ((float)apst.q3bytes * times);
+    assign_string(&fstates[q3bytes] , "q3bytes");
+    fstates[q3qlen].value = ((float)apst.q3qlen);
+    assign_string(&fstates[q3qlen] , "q3qlen");
+    fstates[q3backlog].value = ((float)apst.q3backlog);
+    assign_string(&fstates[q3backlog] , "q3backlog");
+    fstates[q3drops].value = ((float)apst.q3drops);
+    assign_string(&fstates[q3drops] , "q3drops");
+    fstates[q3requeues].value = ((float)q3requeues * times);
+    assign_string(&fstates[q3requeues] , "q3requeues");
+    fstates[q3overlimits].value = ((float)q3overlimits * times);
+    assign_string(&fstates[q3overlimits] , "q3overlimits");
+
+    fstates[qfpackets].value = ((float)apst.qfpackets) * times;
+    assign_string(&fstates[qfpackets] , "qfpackets");
+    fstates[qfbytes].value = ((float)apst.qfbytes * times);
+    assign_string(&fstates[qfbytes] , "qfbytes");
+    fstates[qfqlen].value = ((float)apst.qfqlen);
+    assign_string(&fstates[qfqlen] , "qfqlen");
+    fstates[qfbacklog].value = ((float)apst.qfbacklog);
+    assign_string(&fstates[qfbacklog] , "qfbacklog");
+    fstates[qfdrops].value = ((float)apst.qfdrops);
+    assign_string(&fstates[qfdrops] , "qfdrops");
+    fstates[qfrequeues].value = ((float)qfrequeues * times);
+    assign_string(&fstates[qfrequeues] , "qfrequeues");
+    fstates[qfoverlimits].value = ((float)qfoverlimits * times);
+    assign_string(&fstates[qfoverlimits] , "qfoverlimits");
+
+    // for (i = 0; i < 22; i++)
     // {
-    //   VLOG_INFO("%s: %f\t", fstates[i].name, fstates[i].value);
+    //   VLOG_INFO("ddd %s: %f\t", fstates[i].name, fstates[i].value);
     //   if(!(i % 4))
     //     VLOG_INFO("\n");
     // }
 
-    search_results = bst_search(tnode, fstates, 14);
+    search_results = bst_search(tnode, fstates, 22);
 
     // search_results = 1;
     if (search_results)
@@ -4362,7 +4395,7 @@ void handle_msg(const struct ofpbuf *msg)
   // strcpy(msg_rec, length - 1);
   memcpy(msg_rec, (char *)msg->data + 16, length - 1);
   // msg_rec[length - 1] = '\0';
-  // VLOG_INFO("msg_rec is %s\n", msg_rec);
+  VLOG_INFO("msg_rec is %s\n", msg_rec);
   init_linger_m(msg_rec);
   main_linger();
   free(msg_rec);
