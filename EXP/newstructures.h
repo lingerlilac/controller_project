@@ -47,6 +47,35 @@ struct data_iw
   __u32 pad;
 };
 
+struct data_iwp
+{
+    __be64 timex;
+    __u32 inactive_time;
+    __u32 rx_bytes;
+    __u32 rx_packets;
+    __u32 tx_bytes;
+    __u32 tx_packets;
+    __u32 tx_retries;
+    __u32 tx_failed;
+    __s32 signal;
+    __s32 signal_avg;
+    float expected_throughput;
+    struct data_iwp *next;
+};
+
+struct data_iwget
+{
+    float inactive_time;
+    float rx_bytes;
+    float rx_packets;
+    float tx_bytes;
+    float tx_packets;
+    float tx_retries;
+    float tx_failed;
+    __s32 signal;
+    __s32 signal_avg;
+    float expected_throughput;
+};
 // struct data_iw_mac
 // {
 //   char station[6];
@@ -264,6 +293,8 @@ struct station_list
   char station[6];
   __u32 sec;
   __u32 count;
+  struct data_iwget iwget;
+  struct data_iwp* iwh;
   struct station_list *next;
 };
 struct winsize_t
